@@ -1,0 +1,26 @@
+{
+  "sourceLabel": "Bundled teaching catalog for rosbridge-connected systems",
+  "cards": [
+    {
+      "category": "Concept",
+      "title": "Topics are streams",
+      "detail": "Pick one topic, inspect its message type, then compare the publishers and subscribers shown in the detail view."
+    },
+    {
+      "category": "Concept",
+      "title": "Services are request/response",
+      "detail": "Select a service, load a request template, call it, and then look for resulting topic or log changes."
+    },
+    {
+      "category": "Exercise",
+      "title": "Begin with a harmless topic",
+      "detail": "Use `std_msgs/String` or another simple message type first, then publish a small JSON payload and watch the stream panel."
+    },
+    {
+      "category": "Reference",
+      "title": "Run the example teaching workspace",
+      "detail": "The companion `ROS2-Workspace/` folder starts rosbridge, rosapi, and demo nodes for this UI.",
+      "command": "cd ROS2-Workspace && docker compose up --build"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ros2_learning_demo</name>
+  <version>0.1.0</version>
+  <description>Small ROS 2 teaching package with demo topics, services, logs, and rosbridge launch files.</description>
+  <maintainer email="workshop@example.com">Workshop Team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>example_interfaces</depend>
+  <depend>rosbridge_server</depend>
+  <depend>rosapi</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

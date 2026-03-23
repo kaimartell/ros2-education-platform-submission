@@ -1,0 +1,15 @@
+services:
+  ros2-learning-demo:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: ros2-learning-demo
+    stdin_open: true
+    tty: true
+    environment:
+      ROS_DOMAIN_ID: "25"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    ports:
+      - "9090:9090"
+      - "8000:8000"
+    command: ros2 launch ros2_learning_demo backend_stack.launch.py autostart_demo:=architecture_demo
