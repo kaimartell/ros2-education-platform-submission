@@ -50,22 +50,35 @@ export function renderEventTimeline(viewModel) {
         </div>
       </div>
 
-      <div class="concept-timeline-list">
-        ${viewModel.events.map((event, index) => `
-          <button
-            type="button"
-            class="concept-timeline-item ${index === viewModel.activeEventIndex ? "active" : ""} ${index < viewModel.activeEventIndex ? "past" : ""} ${viewModel.shouldDimTimeline && index !== viewModel.activeEventIndex ? "dimmed" : ""}"
-            ${viewModel.guidedMode ? "disabled" : `data-action="select-concept-event" data-index="${index}"`}
-          >
-            <span class="concept-timeline-seq">${event.sequence}</span>
-            <span class="concept-timeline-copy">
-              <strong>${escapeHtml(event.label)}</strong>
-              <span>${escapeHtml(event.timelineText || event.label)}</span>
-            </span>
-            <span class="concept-timeline-meta">${escapeHtml(event.eventType)}</span>
-          </button>
-        `).join("")}
-      </div>
+      <details class="concept-timeline-list-shell">
+        <summary class="concept-timeline-toggle">
+          <span class="concept-timeline-toggle-copy">
+            <strong>
+              <span class="concept-timeline-toggle-closed">Show all events</span>
+              <span class="concept-timeline-toggle-open">Hide full event list</span>
+            </strong>
+            <span>${escapeHtml(viewModel.guidedMode ? "Optional full step list" : "Optional detailed event list")}</span>
+          </span>
+          ${renderTag(`${viewModel.events.length} events`, "accent")}
+        </summary>
+
+        <div class="concept-timeline-list">
+          ${viewModel.events.map((event, index) => `
+            <button
+              type="button"
+              class="concept-timeline-item ${index === viewModel.activeEventIndex ? "active" : ""} ${index < viewModel.activeEventIndex ? "past" : ""} ${viewModel.shouldDimTimeline && index !== viewModel.activeEventIndex ? "dimmed" : ""}"
+              ${viewModel.guidedMode ? "disabled" : `data-action="select-concept-event" data-index="${index}"`}
+            >
+              <span class="concept-timeline-seq">${event.sequence}</span>
+              <span class="concept-timeline-copy">
+                <strong>${escapeHtml(event.label)}</strong>
+                <span>${escapeHtml(event.timelineText || event.label)}</span>
+              </span>
+              <span class="concept-timeline-meta">${escapeHtml(event.eventType)}</span>
+            </button>
+          `).join("")}
+        </div>
+      </details>
     </div>
   `;
 }

@@ -1,0 +1,41 @@
+⏺ Task Card — Swap the timeline and explanation card order
+
+  Task type
+
+  UI Polish
+
+  Goal
+
+  The timeline list should be collapsed into the rail by default, and make the full2 column event list expandable 
+  via a show alle vents toggle
+
+  Problem
+
+  when toggled, there is a lot of words on the page that can be overwhelming for the user. We want to limit as much
+  information as necessary so the user doesn't have unimportant information.
+
+  Expected behavior
+  After this change:
+  - The column event list is expandable via a show all events toggle
+  - The list can collapse into the timeline rail by default
+
+  Context
+
+  File: Pyscript/src/ui/pages/concept-code.js
+
+  Constraints
+
+  - Do not change any JavaScript behavior, state management, or event handling
+  - Do not change the advanced/experimental panel (it stays last)
+  - Do not remove any components — only reorder explanation and timeline
+  - Responsive behavior at 1280px, 900px, and 720px breakpoints must remain
+  intact
+
+  Deliverable format
+
+  Return:
+  1. Diagnosis or plan
+  2. Files changed
+  3. Key behavior change 
+  4. Validation performed
+  5. Risks / follow-ups

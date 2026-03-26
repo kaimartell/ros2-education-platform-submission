@@ -1,0 +1,113 @@
+⏺ Task Card — Move Explanation Card Above Timeline & Reduce Main Grid Height
+
+  Task type
+
+  UI Polish
+
+  Goal
+
+  Improve the learning flow and reduce unnecessary scrolling on the Concept +
+  Code page by reordering the guide panel sections and reducing the main grid
+  min-height.
+
+  Problem
+
+  The explanation card is currently rendered after the timeline, which weakens
+  the teaching flow because users see navigation before the explanatory content.
+   Also, the main grid min-height is too tall (44rem / 704px), which pushes the
+  guide content below the fold on typical laptop screens (1366x768 or 1440x900).
+   The natural learning flow should be: see event in the code/graph panels →
+  read explanation → optionally browse the timeline. Currently the user must
+  scroll past timeline buttons to reach the teaching content.
+
+  Expected behavior
+
+  After this change:
+  - The explanation card renders immediately after the guide panel header and
+  description copy, before the timeline
+  - The main grid panels (code panel + runtime graph) are shorter by default,
+  bringing the guide panel into the viewport without scrolling
+  - All existing functionality (playback, timeline navigation, explanation
+  content, guided mode) continues to work identically
+  - The page feels less scroll-heavy on a standard laptop screen
+
+  Context
+
+  File: Pyscript/src/ui/pages/concept-code.js
+
+  Inside the <section class="panel concept-guide-panel"> block (lines 85–151),
+  the current render order is:
+  1. Guide header + playback controls (lines 86–98)
+  2. Description copy (lines 100–104)
+  3. Guided panel — conditional (line 106)
+  4. Event timeline (line 107)
+  5. Explanation card (line 108)
+  6. Advanced/experimental panel (lines 110–150)
+
+  The explanation card (line 108) needs to move above the event timeline (line
+  107).
+
+  File: Pyscript/styles/main.css
+
+  - .concept-stage-panel at line 716–718 sets min-height: 44rem — reduce to
+  32rem
+  - .concept-code-viewer at line 912–913 sets min-height: 38rem and max-height: 
+  46rem — reduce to min-height: 28rem and max-height: 38rem
+  - .concept-graph-shell at line 999–1000 sets min-height: 40rem — reduce to
+  30rem
+  - .concept-graph-svg at line 1014 sets min-height: 38rem — reduce to 28rem
+
+  Constraints
+
+  - Do not change any JavaScript behavior, state management, or event handling
+  - Do not change the render order of the guided panel (it stays before both
+  explanation and timeline)
+  - Do not change the advanced/experimental panel (it stays last)
+  - Do not remove any components — only reorder explanation and timeline
+  - Do not change colors, typography, border-radius, or other visual properties
+  - The code panel and graph panel must still stretch to equal height
+  (align-items: stretch on .concept-main-grid)
+  - Responsive behavior at 1280px, 900px, and 720px breakpoints must remain
+  intact
+
+  Acceptance criteria
+
+  1. The explanation card appears directly below the guided panel (or below the
+  description copy in explore mode), before the event timeline
+  2. .concept-stage-panel min-height is 32rem
+  3. .concept-code-viewer min-height is 28rem, max-height is 38rem
+  4. .concept-graph-shell min-height is 30rem
+  5. .concept-graph-svg min-height is 28rem
+  6. No other lines in either file are changed
+
+  Validation
+
+  1. Open the app in a browser at a typical laptop resolution (1440x900)
+  2. Navigate to the Concept + Code page
+  3. Verify the code panel and runtime graph are visible without excessive empty
+   space
+  4. Verify the explanation card is visible below the panels without scrolling
+  (or with minimal scrolling)
+  5. Verify the timeline appears below the explanation card
+  6. Click play — verify playback still advances events, updates the explanation
+   card, and animates the timeline
+  7. Click a timeline event — verify the explanation card updates and code/graph
+   panels highlight correctly
+  8. Switch to Guided mode — verify the guided panel appears, explanation card
+  still renders before the timeline, and guided interactions work
+  9. Resize the browser to below 1280px — verify the layout stacks to single
+  column cleanly
+  10. Resize to below 900px — verify timeline and explanation grid collapse to
+  single column
+
+  Deliverable format
+
+  Return:
+  1. Diagnosis or plan
+  2. Files changed (should be exactly 2: concept-code.js and main.css)
+  3. Key behavior change (explanation card now appears before timeline; panels
+  are shorter)
+  4. Validation performed
+  5. Risks / follow-ups
+
+✻ Worked for 31s

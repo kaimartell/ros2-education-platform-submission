@@ -1,0 +1,45 @@
+⏺ Task Card — Swap the timeline and explanation card order
+
+  Task type
+
+  UI Polish
+
+  Goal
+
+  The why did this happen content should be immediately below or adjacent to the panels, not under the timeline
+
+  Problem
+
+  The natural flow of the page should be that the user sees the event, and then understands the event
+  Currently, the explanation card renders after the timeline list, meaning the user needs to scroll past
+  event buttons to reach the teaching content. 
+
+  Expected behavior
+  After this change:
+  - The explanation card should be easily visible and easy to read
+  - The learning should directly follow the observation
+
+  Context
+
+  File: Pyscript/src/ui/pages/concept-code.js
+
+  Constraints
+
+  - Do not change any JavaScript behavior, state management, or event handling
+  - Do not change the advanced/experimental panel (it stays last)
+  - Do not remove any components — only reorder explanation and timeline
+  - Responsive behavior at 1280px, 900px, and 720px breakpoints must remain
+  intact
+
+  Acceptance criteria
+
+  1. The explanation card has swapped places with the timeline
+
+  Deliverable format
+
+  Return:
+  1. Diagnosis or plan
+  2. Files changed
+  3. Key behavior change 
+  4. Validation performed
+  5. Risks / follow-ups

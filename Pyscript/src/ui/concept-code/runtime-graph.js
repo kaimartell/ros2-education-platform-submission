@@ -1,4 +1,5 @@
-import { escapeHtml, renderPill, renderTag } from "../utils.js";
+import { renderPlaybackControls } from "./playback-controls.js";
+import { escapeHtml, renderPill } from "../utils.js";
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -154,13 +155,6 @@ export function renderRuntimeGraphPanel(state, viewModel) {
           : "The teaching diagram is intentionally slowed down and expanded so the current flow stays readable while code and runtime stay synchronized.")}
       </p>
 
-      <div class="concept-runtime-tags">
-        ${renderTag(viewModel.template.shortLabel, "accent")}
-        ${activeEvent ? renderTag(activeEvent.eventType, activeEvent.eventType === "feedback" || activeEvent.eventType === "result" ? "warning" : "default") : ""}
-        ${viewModel.guidedMode ? renderTag(viewModel.guidedQuestionKind, "default") : ""}
-        ${activeEvent?.messagePreview ? renderTag(activeEvent.messagePreview, "default") : ""}
-      </div>
-
       <div class="concept-graph-shell">
         <svg class="concept-graph-svg" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}" aria-label="Concept and runtime graph">
           <defs>
@@ -226,6 +220,12 @@ export function renderRuntimeGraphPanel(state, viewModel) {
             return renderToken(segment, geometry, viewModel.progressMs);
           }).join("")}
         </svg>
+
+        ${viewModel.guidedMode ? "" : `
+          <aside class="concept-playback-dock" aria-label="Playback controls">
+            ${renderPlaybackControls(state, viewModel)}
+          </aside>
+        `}
       </div>
     </section>
   `;

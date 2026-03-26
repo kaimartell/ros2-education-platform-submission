@@ -116,9 +116,18 @@ export function createConceptCodeGuidedState() {
   };
 }
 
+export function createConceptCodeDockState() {
+  return {
+    compact: true,
+    x: null,
+    y: null,
+  };
+}
+
 export function createConceptCodeState() {
   return {
     currentExampleId: "simple-publisher",
+    introCollapsed: true,
     mode: "explore",
     sourceMode: "demo",
     resolvedMode: "demo",
@@ -142,7 +151,9 @@ export function createConceptCodeState() {
       selectedCodeBlockId: "",
       hoveredGraphElementId: "",
       selectedGraphElementId: "",
+      expandedCodeSummaryIds: [],
     },
+    dock: createConceptCodeDockState(),
     guided: createConceptCodeGuidedState(),
   };
 }

@@ -15,6 +15,7 @@ import { RosIntrospection } from "./core/ros-introspection.js";
 import {
   APP_PAGES,
   createCatalogState,
+  createConceptCodeDockState,
   createConceptCodeState,
   createConceptCodeGuidedState,
   createFeedbackState,
@@ -54,6 +55,12 @@ const pendingDetailRequests = new Map();
 let topicFlowAnimationFrameId = null;
 let conceptCodePlaybackFrameId = null;
 let conceptCodeLastFrameTime = 0;
+let conceptCodeDockDragState = null;
+let conceptCodeExplanationCueKey = "";
+let conceptCodeExplanationCuePhase = "a";
+let conceptCodeExplanationCueTimeoutId = null;
+let conceptCodeActiveBlockScrollKey = "";
+let conceptCodeActiveBlockScrollTimeoutId = null;
 let renderQueued = false;
 
 function normalizePage(pageName) {
@@ -148,9 +155,28 @@ function restoreFocus(descriptor) {
 }
 
 function flushRender() {
+  const nextExplanationCueKey = state.page === "code-flow" ? getConceptCodeExplanationCueKey() : "";
+  const shouldTriggerExplanationCue = !!nextExplanationCueKey
+    && !!conceptCodeExplanationCueKey
+    && conceptCodeExplanationCueKey !== nextExplanationCueKey;
+  conceptCodeExplanationCueKey = nextExplanationCueKey;
+  const nextActiveBlockScrollKey = state.page === "code-flow" ? getConceptCodeActiveBlockScrollKey() : "";
+  const shouldQueueActiveBlockScroll = !!nextActiveBlockScrollKey
+    && conceptCodeActiveBlockScrollKey !== nextActiveBlockScrollKey;
+  conceptCodeActiveBlockScrollKey = nextActiveBlockScrollKey;
   const focusDescriptor = captureFocusDescriptor();
   patchHtml(root, renderApp(state));
   restoreFocus(focusDescriptor);
+  syncConceptCodeDockToViewport();
+  syncConceptCodeSummaryOverflowState();
+
+  if (shouldTriggerExplanationCue) {
+    triggerConceptCodeExplanationCue();
+  }
+
+  if (shouldQueueActiveBlockScroll) {
+    queueConceptCodeActiveBlockScroll();
+  }
 }
 
 function render(immediate = false) {
@@ -169,6 +195,271 @@ function render(immediate = false) {
     renderQueued = false;
     flushRender();
   });
+}
+
+function getConceptCodeExplanationCueKey() {
+  const template = getConceptCodeTemplate(state.conceptCode.currentExampleId);
+  const lesson = getGuidedLesson(template.id);
+  const events = state.conceptCode.events.length
+    ? state.conceptCode.events
+    : createConceptCodeEventList(template.id);
+  const guidedMode = state.conceptCode.mode === "guided" && !!lesson;
+
+  if (guidedMode) {
+    if (state.conceptCode.guided.completed) {
+      return `${template.id}:guided:complete`;
+    }
+
+    const stepIndex = Math.min(
+      Math.max(state.conceptCode.guided.stepIndex, 0),
+      Math.max((lesson.steps?.length || 1) - 1, 0)
+    );
+    const step = lesson.steps?.[stepIndex] || null;
+    const showExplanation = state.conceptCode.guided.answerCorrect === true
+      || state.conceptCode.guided.explanationRevealed;
+
+    return `${template.id}:guided:${step?.id || stepIndex}:${showExplanation ? "shown" : "hidden"}`;
+  }
+
+  const activeEventIndex = Math.min(
+    Math.max(state.conceptCode.playback.activeEventIndex, 0),
+    Math.max(events.length - 1, 0)
+  );
+  const activeEvent = events[activeEventIndex] || null;
+
+  return `${template.id}:explore:${activeEvent?.id || activeEventIndex}`;
+}
+
+function getConceptCodeActiveBlockScrollKey() {
+  const template = getConceptCodeTemplate(state.conceptCode.currentExampleId);
+  const lesson = getGuidedLesson(template.id);
+  const events = state.conceptCode.events.length
+    ? state.conceptCode.events
+    : createConceptCodeEventList(template.id);
+  const guidedMode = state.conceptCode.mode === "guided" && !!lesson;
+
+  if (guidedMode) {
+    if (state.conceptCode.guided.completed) {
+      return `${template.id}:guided:complete`;
+    }
+
+    const stepIndex = Math.min(
+      Math.max(state.conceptCode.guided.stepIndex, 0),
+      Math.max((lesson.steps?.length || 1) - 1, 0)
+    );
+    const step = lesson.steps?.[stepIndex] || null;
+    return `${template.id}:guided:${step?.id || stepIndex}`;
+  }
+
+  const activeEventIndex = Math.min(
+    Math.max(state.conceptCode.playback.activeEventIndex, 0),
+    Math.max(events.length - 1, 0)
+  );
+  const activeEvent = events[activeEventIndex] || null;
+
+  return `${template.id}:explore:${activeEvent?.id || activeEventIndex}`;
+}
+
+function triggerConceptCodeExplanationCue() {
+  conceptCodeExplanationCuePhase = conceptCodeExplanationCuePhase === "a" ? "b" : "a";
+
+  const explanationPanel = root.querySelector(".concept-explanation-panel");
+  if (!explanationPanel) {
+    return;
+  }
+
+  if (conceptCodeExplanationCueTimeoutId !== null) {
+    window.clearTimeout(conceptCodeExplanationCueTimeoutId);
+  }
+
+  explanationPanel.classList.remove("explanation-cue-a", "explanation-cue-b");
+  void explanationPanel.offsetWidth;
+  explanationPanel.classList.add(`explanation-cue-${conceptCodeExplanationCuePhase}`);
+
+  conceptCodeExplanationCueTimeoutId = window.setTimeout(() => {
+    conceptCodeExplanationCueTimeoutId = null;
+    root.querySelector(".concept-explanation-panel")?.classList.remove("explanation-cue-a", "explanation-cue-b");
+  }, 720);
+}
+
+function queueConceptCodeActiveBlockScroll() {
+  if (conceptCodeActiveBlockScrollTimeoutId !== null) {
+    window.clearTimeout(conceptCodeActiveBlockScrollTimeoutId);
+    conceptCodeActiveBlockScrollTimeoutId = null;
+  }
+
+  window.requestAnimationFrame(() => {
+    const container = root.querySelector(".concept-annotated-view");
+    const activeBlock = root.querySelector(".concept-annotated-block.active");
+    if (!container || !activeBlock) {
+      return;
+    }
+
+    activeBlock.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    conceptCodeActiveBlockScrollTimeoutId = window.setTimeout(() => {
+      conceptCodeActiveBlockScrollTimeoutId = null;
+
+      if (!root.contains(container) || !root.contains(activeBlock)) {
+        return;
+      }
+
+      const containerRect = container.getBoundingClientRect();
+      const activeRect = activeBlock.getBoundingClientRect();
+      const inset = 8;
+
+      if (activeRect.top < containerRect.top) {
+        container.scrollTop += activeRect.top - containerRect.top - inset;
+      } else if (activeRect.bottom > containerRect.bottom) {
+        container.scrollTop += activeRect.bottom - containerRect.bottom + inset;
+      }
+    }, 90);
+  });
+}
+
+function syncConceptCodeSummaryOverflowState() {
+  if (state.page !== "code-flow") {
+    return;
+  }
+
+  root.querySelectorAll(".concept-annotated-block").forEach((block) => {
+    const summaryShell = block.querySelector(".concept-annotated-summary-shell");
+    const summary = block.querySelector(".concept-annotated-summary");
+    const toggle = block.querySelector(".concept-annotated-toggle");
+    if (!summaryShell || !summary || !toggle) {
+      return;
+    }
+
+    const isExpanded = block.classList.contains("summary-expanded");
+    if (!isExpanded) {
+      toggle.hidden = false;
+    }
+    const isTruncated = summary.scrollWidth > (summary.clientWidth + 1);
+
+    block.classList.toggle("summary-truncated", isTruncated);
+    summaryShell.classList.toggle("is-truncated", isTruncated);
+    toggle.hidden = !isExpanded && !isTruncated;
+  });
+}
+
+function getEventTargetElement(target) {
+  if (target instanceof Element) {
+    return target;
+  }
+
+  return target instanceof Node ? target.parentElement : null;
+}
+
+function closestFromEventTarget(target, selector) {
+  const element = getEventTargetElement(target);
+  return element ? element.closest(selector) : null;
+}
+
+function hasCustomConceptCodeDockPosition(dock = state.conceptCode?.dock) {
+  return Number.isFinite(dock?.x) && Number.isFinite(dock?.y);
+}
+
+function clampConceptCodeDockPosition(left, top, width, height) {
+  const margin = 12;
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - height - margin);
+
+  return {
+    left: Math.round(Math.min(Math.max(margin, left), maxLeft)),
+    top: Math.round(Math.min(Math.max(margin, top), maxTop)),
+  };
+}
+
+function applyConceptCodeDockPosition(left, top) {
+  state.conceptCode.dock.x = left;
+  state.conceptCode.dock.y = top;
+
+  const dockElement = root.querySelector(".concept-playback-dock");
+  if (!dockElement) {
+    return;
+  }
+
+  dockElement.style.left = `${left}px`;
+  dockElement.style.top = `${top}px`;
+  dockElement.style.right = "auto";
+  dockElement.style.bottom = "auto";
+  dockElement.style.transform = "none";
+}
+
+function syncConceptCodeDockToViewport() {
+  if (state.page !== "code-flow" || state.conceptCode.mode === "guided" || !hasCustomConceptCodeDockPosition()) {
+    return;
+  }
+
+  const dockElement = root.querySelector(".concept-playback-dock");
+  if (!dockElement) {
+    return;
+  }
+
+  const rect = dockElement.getBoundingClientRect();
+  const nextPosition = clampConceptCodeDockPosition(rect.left, rect.top, rect.width, rect.height);
+
+  if (nextPosition.left === state.conceptCode.dock.x && nextPosition.top === state.conceptCode.dock.y) {
+    return;
+  }
+
+  applyConceptCodeDockPosition(nextPosition.left, nextPosition.top);
+}
+
+function startConceptCodeDockDrag(event, handle) {
+  if (state.page !== "code-flow" || state.conceptCode.mode === "guided") {
+    return;
+  }
+
+  if (typeof event.button === "number" && event.button !== 0) {
+    return;
+  }
+
+  const dockElement = handle.closest(".concept-playback-dock");
+  if (!dockElement) {
+    return;
+  }
+
+  const rect = dockElement.getBoundingClientRect();
+  const nextPosition = clampConceptCodeDockPosition(rect.left, rect.top, rect.width, rect.height);
+  applyConceptCodeDockPosition(nextPosition.left, nextPosition.top);
+
+  conceptCodeDockDragState = {
+    pointerId: event.pointerId,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+
+  dockElement.classList.add("dragging");
+  handle.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function updateConceptCodeDockDrag(event) {
+  if (!conceptCodeDockDragState || event.pointerId !== conceptCodeDockDragState.pointerId) {
+    return;
+  }
+
+  const nextPosition = clampConceptCodeDockPosition(
+    event.clientX - conceptCodeDockDragState.offsetX,
+    event.clientY - conceptCodeDockDragState.offsetY,
+    conceptCodeDockDragState.width,
+    conceptCodeDockDragState.height
+  );
+
+  applyConceptCodeDockPosition(nextPosition.left, nextPosition.top);
+}
+
+function stopConceptCodeDockDrag(event) {
+  if (!conceptCodeDockDragState || event.pointerId !== conceptCodeDockDragState.pointerId) {
+    return;
+  }
+
+  root.querySelector(".concept-playback-dock")?.classList.remove("dragging");
+  conceptCodeDockDragState = null;
+  render();
 }
 
 function stopTopicFlowAnimationLoop() {
@@ -680,6 +971,7 @@ function resetGraphDependentState() {
   state.conceptCode = {
     ...createConceptCodeState(),
     currentExampleId: previousConceptCode.currentExampleId,
+    introCollapsed: previousConceptCode.introCollapsed,
     mode: previousConceptCode.mode,
     sourceMode: previousConceptCode.sourceMode,
     codeView: previousConceptCode.codeView,
@@ -687,6 +979,10 @@ function resetGraphDependentState() {
     playback: {
       ...createConceptCodeState().playback,
       speed: previousConceptCode.playback.speed,
+    },
+    dock: {
+      ...createConceptCodeDockState(),
+      ...previousConceptCode.dock,
     },
   };
 
@@ -1257,6 +1553,10 @@ async function handleAction(action, element) {
       state.conceptCode.codeView = element.dataset.view === "code" ? "code" : "structure";
       render();
       return;
+    case "concept-toggle-intro":
+      state.conceptCode.introCollapsed = !state.conceptCode.introCollapsed;
+      render();
+      return;
     case "concept-play":
       startConceptCodePlayback();
       return;
@@ -1268,6 +1568,15 @@ async function handleAction(action, element) {
       return;
     case "concept-reset":
       restartConceptCodePlayback();
+      return;
+    case "concept-toggle-dock-compact":
+      state.conceptCode.dock.compact = !state.conceptCode.dock.compact;
+      render();
+      return;
+    case "concept-reset-dock-position":
+      state.conceptCode.dock.x = null;
+      state.conceptCode.dock.y = null;
+      render();
       return;
     case "concept-guided-prev":
       if (state.conceptCode.guided.completed) {
@@ -1353,6 +1662,19 @@ async function handleAction(action, element) {
       state.conceptCode.interaction.selectedGraphElementId = "";
       render();
       return;
+    case "concept-toggle-code-summary": {
+      const blockId = element.dataset.blockId || "";
+      if (!blockId) {
+        return;
+      }
+
+      const expandedIds = state.conceptCode.interaction.expandedCodeSummaryIds || [];
+      state.conceptCode.interaction.expandedCodeSummaryIds = expandedIds.includes(blockId)
+        ? expandedIds.filter((id) => id !== blockId)
+        : [...expandedIds, blockId];
+      render();
+      return;
+    }
     case "select-concept-graph-element":
       if (state.conceptCode.mode === "guided" && handleGuidedGraphElementSelection(element.dataset.elementId || "")) {
         return;
@@ -1376,15 +1698,35 @@ async function handleAction(action, element) {
 
 function bindEvents() {
   root.addEventListener("click", async (event) => {
-    const trigger = event.target.closest("[data-action]");
+    const trigger = closestFromEventTarget(event.target, "[data-action]");
     if (!trigger) {
       return;
     }
     await handleAction(trigger.dataset.action, trigger);
   });
 
+  root.addEventListener("pointerdown", (event) => {
+    const handle = closestFromEventTarget(event.target, "[data-concept-dock-handle]");
+    if (!handle) {
+      return;
+    }
+
+    startConceptCodeDockDrag(event, handle);
+  });
+
+  window.addEventListener("pointermove", updateConceptCodeDockDrag);
+  window.addEventListener("pointerup", stopConceptCodeDockDrag);
+  window.addEventListener("pointercancel", stopConceptCodeDockDrag);
+  window.addEventListener("resize", () => {
+    syncConceptCodeSummaryOverflowState();
+    if (!hasCustomConceptCodeDockPosition()) {
+      return;
+    }
+    syncConceptCodeDockToViewport();
+  });
+
   root.addEventListener("mouseover", (event) => {
-    const trigger = event.target.closest("[data-concept-hover-type]");
+    const trigger = closestFromEventTarget(event.target, "[data-concept-hover-type]");
     if (!trigger) {
       return;
     }
@@ -1392,14 +1734,12 @@ function bindEvents() {
   });
 
   root.addEventListener("mouseout", (event) => {
-    const trigger = event.target.closest("[data-concept-hover-type]");
+    const trigger = closestFromEventTarget(event.target, "[data-concept-hover-type]");
     if (!trigger) {
       return;
     }
 
-    const nextTarget = event.relatedTarget instanceof Element
-      ? event.relatedTarget.closest("[data-concept-hover-type]")
-      : null;
+    const nextTarget = closestFromEventTarget(event.relatedTarget, "[data-concept-hover-type]");
     if (nextTarget === trigger) {
       return;
     }
@@ -1408,29 +1748,30 @@ function bindEvents() {
   });
 
   root.addEventListener("input", (event) => {
-    const binding = event.target.dataset.bind;
+    const target = getEventTargetElement(event.target);
+    const binding = target?.dataset.bind;
     if (!binding) {
       return;
     }
 
     switch (binding) {
       case "connection-url":
-        state.connection.url = event.target.value;
+        state.connection.url = target.value;
         return;
       case "system-search":
-        state.system.searchText = event.target.value;
+        state.system.searchText = target.value;
         render();
         return;
       case "topic-search":
-        state.topics.searchText = event.target.value;
+        state.topics.searchText = target.value;
         render();
         return;
       case "topic-raw":
-        state.topics.composer.rawText = event.target.value;
+        state.topics.composer.rawText = target.value;
         return;
       case "topic-simple-text": {
         const detail = state.graph.details.get(selectionCacheKey("topic", state.topics.selectedTopicName));
-        state.topics.composer.simpleText = event.target.value;
+        state.topics.composer.simpleText = target.value;
         if (detail?.type) {
           syncTopicComposerRawFromSimple(detail.type);
         }
@@ -1438,7 +1779,7 @@ function bindEvents() {
       }
       case "topic-simple-number": {
         const detail = state.graph.details.get(selectionCacheKey("topic", state.topics.selectedTopicName));
-        state.topics.composer.simpleNumber = event.target.value;
+        state.topics.composer.simpleNumber = target.value;
         if (detail?.type) {
           syncTopicComposerRawFromSimple(detail.type);
         }
@@ -1448,7 +1789,7 @@ function bindEvents() {
         if (state.conceptCode.mode === "guided") {
           return;
         }
-        const nextIndex = Number.parseInt(event.target.value || "0", 10);
+        const nextIndex = Number.parseInt(target.value || "0", 10);
         if (Number.isNaN(nextIndex)) {
           return;
         }
@@ -1463,7 +1804,7 @@ function bindEvents() {
         return;
       }
       case "service-request":
-        state.system.serviceRequestText = event.target.value;
+        state.system.serviceRequestText = target.value;
         return;
       default:
         return;
@@ -1471,33 +1812,34 @@ function bindEvents() {
   });
 
   root.addEventListener("change", async (event) => {
-    const binding = event.target.dataset.bind;
+    const target = getEventTargetElement(event.target);
+    const binding = target?.dataset.bind;
     if (!binding) {
       return;
     }
 
     switch (binding) {
       case "system-show-topics":
-        state.system.showTopics = !!event.target.checked;
+        state.system.showTopics = !!target.checked;
         render();
         return;
       case "system-show-services":
-        state.system.showServices = !!event.target.checked;
+        state.system.showServices = !!target.checked;
         render();
         return;
       case "topic-simple-bool": {
         const detail = state.graph.details.get(selectionCacheKey("topic", state.topics.selectedTopicName));
-        state.topics.composer.simpleBool = !!event.target.checked;
+        state.topics.composer.simpleBool = !!target.checked;
         if (detail?.type) {
           syncTopicComposerRawFromSimple(detail.type);
         }
         return;
       }
       case "service-select":
-        await selectService(event.target.value);
+        await selectService(target.value);
         return;
       case "concept-speed-select": {
-        const speed = Number.parseFloat(event.target.value || "0.7");
+        const speed = Number.parseFloat(target.value || "0.7");
         if (Number.isFinite(speed) && speed > 0) {
           state.conceptCode.playback.speed = speed;
           render();

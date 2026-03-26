@@ -2,7 +2,6 @@ import { renderCodePanel } from "../concept-code/code-panel.js";
 import { renderExplanationCard } from "../concept-code/explanation-card.js";
 import { renderGuidedPanel } from "../concept-code/guided-panel.js";
 import { buildConceptCodeViewModel, getConceptCodeTemplates } from "../concept-code/model.js";
-import { renderPlaybackControls } from "../concept-code/playback-controls.js";
 import { renderRuntimeGraphPanel } from "../concept-code/runtime-graph.js";
 import { renderEventTimeline } from "../concept-code/timeline.js";
 import { escapeHtml, renderInlineList, renderPill, renderTag } from "../utils.js";
@@ -13,6 +12,96 @@ function renderAdapterCandidates(candidates) {
     "No candidate teaching endpoints are visible yet.",
     (candidate) => `<code class="code-chip">${escapeHtml(candidate)}</code>`
   );
+}
+
+function renderConceptExampleSelector(state, templates) {
+  return `
+    <div class="concept-example-row">
+      ${templates.map((template) => `
+        <button
+          type="button"
+          class="${state.conceptCode.currentExampleId === template.id ? "active" : ""}"
+          data-action="concept-select-example"
+          data-example-id="${escapeHtml(template.id)}"
+        >
+          ${escapeHtml(template.label)}
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderConceptModeSwitch(state) {
+  return `
+    <div class="mode-switch concept-mode-switch" aria-label="Concept and Code page mode">
+      <button
+        type="button"
+        class="${state.conceptCode.mode === "explore" ? "active" : ""}"
+        data-action="concept-set-mode"
+        data-mode="explore"
+      >
+        Explore
+      </button>
+      <button
+        type="button"
+        class="${state.conceptCode.mode === "guided" ? "active" : ""}"
+        data-action="concept-set-mode"
+        data-mode="guided"
+      >
+        Guided
+      </button>
+    </div>
+  `;
+}
+
+function renderConceptToolbar(state, templates) {
+  return `
+    <nav class="concept-toolbar" aria-label="Concept and Code controls">
+      <span class="concept-toolbar-title eyebrow">Concept + Code</span>
+      ${renderConceptExampleSelector(state, templates)}
+      ${renderConceptModeSwitch(state)}
+      ${state.conceptCode.introCollapsed ? `
+        <button
+          type="button"
+          class="concept-toolbar-info"
+          data-action="concept-toggle-intro"
+          title="About this page"
+          aria-label="About this page"
+        >
+          <span aria-hidden="true">&#x2139;</span>
+        </button>
+      ` : ""}
+    </nav>
+  `;
+}
+
+function renderConceptWelcome(state, viewModel) {
+  if (state.conceptCode.introCollapsed) {
+    return "";
+  }
+
+  return `
+    <article class="panel concept-welcome-panel">
+      <h3 class="concept-welcome-heading">
+        <button type="button" class="concept-welcome-toggle" data-action="concept-toggle-intro">
+          <span>See ROS ideas and Python code move together.</span>
+          <span class="concept-welcome-chevron" aria-hidden="true">&#x25BE;</span>
+        </button>
+      </h3>
+      <p class="lead">
+        This page is built for beginners who understand nodes, topics, and actions conceptually but want help connecting those ideas
+        to the Python methods and callbacks that actually run.
+      </p>
+      <div class="concept-welcome-side">
+        <div class="concept-runtime-tags">
+          ${renderPill(state.conceptCode.mode === "guided" ? "Guided lesson" : "Demo playback", "accent")}
+          ${renderTag(viewModel.template.shortLabel, "accent")}
+          ${viewModel.template.concepts.map((concept) => renderTag(concept, "default")).join("")}
+        </div>
+        <p class="concept-panel-copy">${escapeHtml(viewModel.template.summary)}</p>
+      </div>
+    </article>
+  `;
 }
 
 export function renderConceptCodePage(state) {
@@ -28,54 +117,8 @@ export function renderConceptCodePage(state) {
 
   return `
     <section class="page-stack concept-code-page">
-      <article class="panel page-intro concept-code-intro">
-        <div class="page-intro-copy">
-          <p class="eyebrow">Concept + Code</p>
-          <h2>See ROS ideas and Python code move together.</h2>
-          <p class="lead">
-            This page is built for beginners who understand nodes, topics, and actions conceptually but want help connecting those ideas
-            to the Python methods and callbacks that actually run.
-          </p>
-        </div>
-        <div class="page-intro-side">
-          <div class="concept-example-row">
-            ${templates.map((template) => `
-              <button
-                type="button"
-                class="${state.conceptCode.currentExampleId === template.id ? "active" : ""}"
-                data-action="concept-select-example"
-                data-example-id="${escapeHtml(template.id)}"
-              >
-                ${escapeHtml(template.label)}
-              </button>
-            `).join("")}
-          </div>
-          <div class="mode-switch concept-mode-switch" aria-label="Concept and Code page mode">
-            <button
-              type="button"
-              class="${state.conceptCode.mode === "explore" ? "active" : ""}"
-              data-action="concept-set-mode"
-              data-mode="explore"
-            >
-              Explore
-            </button>
-            <button
-              type="button"
-              class="${state.conceptCode.mode === "guided" ? "active" : ""}"
-              data-action="concept-set-mode"
-              data-mode="guided"
-            >
-              Guided
-            </button>
-          </div>
-          <div class="concept-runtime-tags">
-            ${renderPill(state.conceptCode.mode === "guided" ? "Guided lesson" : "Demo playback", "accent")}
-            ${renderTag(viewModel.template.shortLabel, "accent")}
-            ${viewModel.template.concepts.map((concept) => renderTag(concept, "default")).join("")}
-          </div>
-          <p class="concept-panel-copy">${escapeHtml(viewModel.template.summary)}</p>
-        </div>
-      </article>
+      ${renderConceptToolbar(state, templates)}
+      ${renderConceptWelcome(state, viewModel)}
 
       <div class="concept-main-grid">
         ${renderCodePanel(state, viewModel)}
@@ -85,16 +128,14 @@ export function renderConceptCodePage(state) {
       <section class="panel concept-guide-panel">
         <div class="concept-guide-head">
           <div>
-            <p class="eyebrow">${escapeHtml(viewModel.guidedMode ? "Guided lesson" : "Guided sequence")}</p>
+            <p class="eyebrow">${escapeHtml(viewModel.guidedMode ? "Guided lesson" : "Event sequence")}</p>
             <h3>${escapeHtml(viewModel.guidedMode
               ? (viewModel.guidedCompleted
                 ? "Lesson complete"
                 : viewModel.guidedStep?.title || "Pick a guided step")
               : viewModel.activeEvent?.label || "Pick a step")}</h3>
           </div>
-          ${viewModel.guidedMode
-            ? renderPill(`Step ${viewModel.guidedStepNumber || 0} of ${viewModel.guidedTotalSteps || 0}`, "accent")
-            : renderPlaybackControls(state, viewModel)}
+          ${viewModel.guidedMode ? renderPill(`Step ${viewModel.guidedStepNumber || 0} of ${viewModel.guidedTotalSteps || 0}`, "accent") : ""}
         </div>
 
         <p class="concept-panel-copy">
@@ -103,9 +144,9 @@ export function renderConceptCodePage(state) {
             : state.conceptCode.statusMessage || "Demo playback is the main learning path on this page.")}
         </p>
 
-        ${viewModel.guidedMode ? renderGuidedPanel(viewModel, { nextTemplate }) : ""}
-        ${renderEventTimeline(viewModel)}
-        ${renderExplanationCard(viewModel)}
+      ${viewModel.guidedMode ? renderGuidedPanel(viewModel, { nextTemplate }) : ""}
+      ${renderExplanationCard(viewModel)}
+      ${renderEventTimeline(viewModel)}
 
         <details class="concept-advanced-panel">
           <summary>Advanced / experimental runtime trace</summary>
