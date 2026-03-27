@@ -25,11 +25,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug repo contents
+        run: |
+          echo "PWD:"
+          pwd
+          echo
+          echo "TOP LEVEL:"
+          ls -la
+          echo
+          echo "TREE:"
+          find . -maxdepth 3 | sort
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Add .nojekyll
-        run: touch pyscript/.nojekyll
+      - name: Verify site folder
+        run: |
+          test -f pyscript/index.html
+          touch pyscript/.nojekyll
+          ls -la pyscript
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
