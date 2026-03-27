@@ -1,4 +1,5 @@
-import { escapeHtml, renderPill, renderTag } from "../utils.js";
+import { renderPlaybackControls } from "./playback-controls.js";
+import { escapeHtml, renderPill } from "../utils.js";
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -23,6 +24,86 @@ function getNodeGeometry(node) {
     height: box.height,
     left: node.x - box.width / 2,
     top: node.y - box.height / 2,
+  };
+}
+
+function expandBounds(bounds, left, top, right = left, bottom = top) {
+  if (!bounds) {
+    return { left, top, right, bottom };
+  }
+
+  return {
+    left: Math.min(bounds.left, left),
+    top: Math.min(bounds.top, top),
+    right: Math.max(bounds.right, right),
+    bottom: Math.max(bounds.bottom, bottom),
+  };
+}
+
+function getGraphOffset(graph, viewBoxWidth, viewBoxHeight) {
+  let bounds = null;
+
+  (graph?.nodes || []).forEach((node) => {
+    const geometry = getNodeGeometry(node);
+    if (!geometry) {
+      return;
+    }
+
+    bounds = expandBounds(bounds, geometry.left, geometry.top, geometry.left + geometry.width, geometry.top + geometry.height);
+  });
+
+  (graph?.edges || []).forEach((edge) => {
+    if (edge?.control && typeof edge.control === "object") {
+      bounds = expandBounds(bounds, edge.control.x, edge.control.y);
+    }
+    if (edge?.labelPosition) {
+      bounds = expandBounds(bounds, edge.labelPosition.x, edge.labelPosition.y);
+    }
+  });
+
+  if (!bounds) {
+    return { x: 0, y: 0 };
+  }
+
+  return {
+    x: ((viewBoxWidth - (bounds.right - bounds.left)) / 2) - bounds.left,
+    y: ((viewBoxHeight - (bounds.bottom - bounds.top)) / 2) - bounds.top,
+  };
+}
+
+function offsetPoint(point, offset) {
+  if (!point) {
+    return point;
+  }
+
+  return {
+    ...point,
+    x: point.x + offset.x,
+    y: point.y + offset.y,
+  };
+}
+
+function offsetNode(node, offset) {
+  if (!node) {
+    return node;
+  }
+
+  return {
+    ...node,
+    x: node.x + offset.x,
+    y: node.y + offset.y,
+  };
+}
+
+function offsetEdge(edge, offset) {
+  if (!edge) {
+    return edge;
+  }
+
+  return {
+    ...edge,
+    control: offsetPoint(edge.control, offset),
+    labelPosition: offsetPoint(edge.labelPosition, offset),
   };
 }
 
@@ -127,18 +208,21 @@ function renderToken(segment, geometry, progressMs) {
 }
 
 export function renderRuntimeGraphPanel(state, viewModel) {
-  const nodesById = new Map(viewModel.template.graph.nodes.map((node) => [node.id, node]));
   const activeEvent = viewModel.activeEvent;
   const eventSegments = activeEvent?.animation?.segments || [];
   const viewBoxWidth = viewModel.template.graph.viewBoxWidth || 960;
   const viewBoxHeight = viewModel.template.graph.viewBoxHeight || 380;
+  const graphOffset = getGraphOffset(viewModel.template.graph, viewBoxWidth, viewBoxHeight);
+  const nodes = viewModel.template.graph.nodes.map((node) => offsetNode(node, graphOffset));
+  const edges = viewModel.template.graph.edges.map((edge) => offsetEdge(edge, graphOffset));
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
 
   return `
     <section class="panel concept-runtime-panel concept-stage-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Runtime visualization</p>
-          <h3>Event-driven ROS flow</h3>
+          <p class="eyebrow">ROS flow</p>
+          <h3>How this step moves through ROS</h3>
         </div>
         ${renderPill(
           viewModel.guidedMode
@@ -150,16 +234,9 @@ export function renderRuntimeGraphPanel(state, viewModel) {
 
       <p class="concept-panel-copy">
         ${escapeHtml(viewModel.guidedMode
-          ? "Guided mode narrows the runtime view to the one lane, node, or topic that matters for this teaching step."
-          : "The teaching diagram is intentionally slowed down and expanded so the current flow stays readable while code and runtime stay synchronized.")}
+          ? "Guided mode keeps the picture focused on the one path that matters for this step."
+          : "The highlighted shapes show where the current step is happening in ROS.")}
       </p>
-
-      <div class="concept-runtime-tags">
-        ${renderTag(viewModel.template.shortLabel, "accent")}
-        ${activeEvent ? renderTag(activeEvent.eventType, activeEvent.eventType === "feedback" || activeEvent.eventType === "result" ? "warning" : "default") : ""}
-        ${viewModel.guidedMode ? renderTag(viewModel.guidedQuestionKind, "default") : ""}
-        ${activeEvent?.messagePreview ? renderTag(activeEvent.messagePreview, "default") : ""}
-      </div>
 
       <div class="concept-graph-shell">
         <svg class="concept-graph-svg" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}" aria-label="Concept and runtime graph">
@@ -169,7 +246,7 @@ export function renderRuntimeGraphPanel(state, viewModel) {
             </marker>
           </defs>
 
-          ${viewModel.template.graph.edges.map((edge) => {
+          ${edges.map((edge) => {
             const geometry = getEdgeGeometry(edge, nodesById);
             const isHighlighted = viewModel.highlightedGraphElementIds.includes(edge.id);
             const isActive = viewModel.activeGraphElementIds.includes(edge.id);
@@ -193,7 +270,7 @@ export function renderRuntimeGraphPanel(state, viewModel) {
             `;
           }).join("")}
 
-          ${viewModel.template.graph.nodes.map((node) => {
+          ${nodes.map((node) => {
             const geometry = getNodeGeometry(node);
             const isHighlighted = viewModel.highlightedGraphElementIds.includes(node.id);
             const isActive = viewModel.activeGraphElementIds.includes(node.id);
@@ -220,12 +297,18 @@ export function renderRuntimeGraphPanel(state, viewModel) {
 
           ${eventSegments.map((segment) => {
             const geometry = getEdgeGeometry(
-              viewModel.template.graph.edges.find((edge) => edge.id === segment.edgeId),
+              edges.find((edge) => edge.id === segment.edgeId),
               nodesById
             );
             return renderToken(segment, geometry, viewModel.progressMs);
           }).join("")}
         </svg>
+
+        ${viewModel.guidedMode ? "" : `
+          <aside class="concept-playback-dock" aria-label="Playback controls">
+            ${renderPlaybackControls(state, viewModel)}
+          </aside>
+        `}
       </div>
     </section>
   `;

@@ -1,4 +1,4 @@
-import { detailCacheKey } from "../state.js";
+import { DEFAULT_PAGE, detailCacheKey } from "../state.js";
 import { renderConceptCodePage } from "./pages/concept-code.js";
 import { renderLaunchPage } from "./pages/launch.js";
 import { renderLearnPage } from "./pages/learn.js";
@@ -61,6 +61,55 @@ function renderNavigation(state) {
   `).join("");
 }
 
+function renderCompactNavigation(state) {
+  return PAGE_META.map((page) => `
+    <button
+      type="button"
+      class="nav-tab-compact ${state.page === page.id ? "active" : ""}"
+      data-action="navigate"
+      data-page="${page.id}"
+    >
+      ${escapeHtml(page.label)}
+    </button>
+  `).join("");
+}
+
+function renderSubpageStrip(state) {
+  const tone = connectionTone(state.connection);
+  const label = connectionLabel(state.connection);
+
+  return `
+    <header class="panel subpage-strip" role="banner">
+      <button
+        type="button"
+        class="subpage-brand"
+        data-action="navigate"
+        data-page="${DEFAULT_PAGE}"
+        title="Back to home"
+      >
+        ROS 2 Classroom
+      </button>
+
+      <div class="subpage-connection">
+        <span class="connection-dot tone-${tone}" aria-label="${escapeHtml(label)}"></span>
+        <span class="connection-label">${escapeHtml(label)}</span>
+        <button
+          type="button"
+          class="subpage-refresh"
+          data-action="refresh-graph"
+          ${state.connection.connected ? "" : "disabled"}
+          title="${state.graph.loading ? "Refreshing..." : "Refresh graph"}"
+          aria-label="Refresh graph"
+        >&#x21BB;</button>
+      </div>
+
+      <nav class="subpage-nav" aria-label="Page navigation">
+        ${renderCompactNavigation(state)}
+      </nav>
+    </header>
+  `;
+}
+
 function renderCurrentPage(state, context) {
   if (state.page === "system") {
     return renderSystemPage(state, context);
@@ -82,6 +131,7 @@ function renderCurrentPage(state, context) {
 }
 
 export function renderApp(state) {
+  const isSubpage = state.page !== DEFAULT_PAGE;
   const context = {
     getDetail: (kind, name) => getDetail(state, kind, name),
     selectedNodeDetail: getDetail(state, "node", state.system.selectedNodeName),
@@ -91,49 +141,51 @@ export function renderApp(state) {
 
   return `
     <div class="app-shell">
-      <header class="panel app-header">
-        <div class="brand-block">
-          <p class="eyebrow">ROS 2 classroom UI</p>
-          <h1>ROS 2 Bridge Classroom</h1>
-          <p class="lead">
-            Connect through rosbridge, then move through Learn, System, Topics, Concept + Code, and Launch without leaving the page.
-          </p>
-        </div>
+      ${isSubpage ? renderSubpageStrip(state) : `
+        <header class="panel app-header">
+          <div class="brand-block">
+            <p class="eyebrow">ROS 2 classroom UI</p>
+            <h1>ROS 2 Bridge Classroom</h1>
+            <p class="lead">
+              Connect through rosbridge, then move through Learn, System, Topics, Concept + Code, and Launch without leaving the page.
+            </p>
+          </div>
 
-        <section class="connection-card">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Connection</p>
-              <h2>rosbridge websocket</h2>
+          <section class="connection-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Connection</p>
+                <h2>rosbridge websocket</h2>
+              </div>
+              ${renderPill(connectionLabel(state.connection), connectionTone(state.connection))}
             </div>
-            ${renderPill(connectionLabel(state.connection), connectionTone(state.connection))}
-          </div>
 
-          <label class="field-label" for="ws-url">Endpoint</label>
-          <div class="connection-row">
-            <input
-              id="ws-url"
-              type="text"
-              data-bind="connection-url"
-              value="${escapeHtml(state.connection.url)}"
-              autocomplete="off"
-              spellcheck="false"
-            >
-            <button type="button" class="accent" data-action="connect-toggle" ${state.connection.phase === "connecting" ? "disabled" : ""}>
-              ${state.connection.connected ? "Disconnect" : state.connection.phase === "connecting" ? "Connecting..." : "Connect"}
-            </button>
-            <button type="button" data-action="refresh-graph" ${state.connection.connected ? "" : "disabled"}>
-              ${state.graph.loading ? "Refreshing..." : "Refresh graph"}
-            </button>
-          </div>
+            <label class="field-label" for="ws-url">Endpoint</label>
+            <div class="connection-row">
+              <input
+                id="ws-url"
+                type="text"
+                data-bind="connection-url"
+                value="${escapeHtml(state.connection.url)}"
+                autocomplete="off"
+                spellcheck="false"
+              >
+              <button type="button" class="accent" data-action="connect-toggle" ${state.connection.phase === "connecting" ? "disabled" : ""}>
+                ${state.connection.connected ? "Disconnect" : state.connection.phase === "connecting" ? "Connecting..." : "Connect"}
+              </button>
+              <button type="button" data-action="refresh-graph" ${state.connection.connected ? "" : "disabled"}>
+                ${state.graph.loading ? "Refreshing..." : "Refresh graph"}
+              </button>
+            </div>
 
-          <p class="muted">${escapeHtml(state.connection.summary)}</p>
-        </section>
-      </header>
+            <p class="muted">${escapeHtml(state.connection.summary)}</p>
+          </section>
+        </header>
 
-      <nav class="panel nav-bar">
-        ${renderNavigation(state)}
-      </nav>
+        <nav class="panel nav-bar">
+          ${renderNavigation(state)}
+        </nav>
+      `}
 
       <div class="global-error-slot">
         ${state.error ? `<div class="callout callout-danger global-error">${escapeHtml(state.error)}</div>` : ""}

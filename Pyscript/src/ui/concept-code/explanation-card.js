@@ -1,5 +1,72 @@
 import { escapeHtml, renderPill, renderTag } from "../utils.js";
 
+const LOW_SIGNAL_MESSAGE_PREVIEWS = new Set(["accepted", "setup", "spin", "timer"]);
+
+function renderStepTone(eventType) {
+  return eventType === "feedback" || eventType === "result" ? "warning" : "accent";
+}
+
+function renderStepKindLabel(eventType) {
+  switch (eventType) {
+    case "setup":
+      return "Setup";
+    case "publish":
+      return "Message move";
+    case "runtime":
+      return "Waiting";
+    case "callback":
+      return "Reply";
+    case "feedback":
+      return "Progress";
+    case "result":
+      return "Result";
+    case "goal":
+      return "Goal";
+    default:
+      return eventType || "Step";
+  }
+}
+
+function renderEmptyState(title, body) {
+  return `
+    <div class="empty-state">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(body)}</p>
+    </div>
+  `;
+}
+
+function combineExplanation(parts, fallback) {
+  const text = (parts || []).filter(Boolean).join(" ").trim();
+  return text || fallback;
+}
+
+function renderExplanationItems(items) {
+  const visibleItems = (items || []).filter((item) => item?.text);
+  if (!visibleItems.length) {
+    return "";
+  }
+
+  return `
+    <div class="concept-explanation-grid">
+      ${visibleItems.map((item) => `
+        <article class="concept-explanation-item">
+          <strong>${escapeHtml(item.title)}</strong>
+          <p>${escapeHtml(item.text)}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderPreviewTag(messagePreview, eventType) {
+  if (!messagePreview || LOW_SIGNAL_MESSAGE_PREVIEWS.has(messagePreview) || messagePreview === eventType) {
+    return "";
+  }
+
+  return renderTag(messagePreview, "warning");
+}
+
 export function renderExplanationCard(viewModel) {
   if (viewModel.guidedMode) {
     if (viewModel.guidedCompleted) {
@@ -17,10 +84,7 @@ export function renderExplanationCard(viewModel) {
     if (!guidedStep) {
       return `
         <div class="concept-explanation-panel">
-          <div class="empty-state">
-            <h3>No guided explanation available</h3>
-            <p>Pick a lesson step to see the explanation layer.</p>
-          </div>
+          ${renderEmptyState("No lesson step selected.", "Restart the lesson to keep going.")}
         </div>
       `;
     }
@@ -37,7 +101,7 @@ export function renderExplanationCard(viewModel) {
           </div>
 
           <div class="callout callout-muted">
-            Answer the prompt above or reveal the explanation to see the code ↔ graph mapping for this step.
+            Answer the prompt or reveal the explanation to unlock this step.
           </div>
         </div>
       `;
@@ -54,8 +118,9 @@ export function renderExplanationCard(viewModel) {
         </div>
 
         <div class="concept-explanation-tags">
-          ${renderTag(viewModel.guidedQuestionKind, "default")}
-          ${viewModel.activeBlock ? renderTag(viewModel.activeBlock.label, "default") : ""}
+          ${viewModel.activeBlock
+            ? renderTag(viewModel.activeBlock.label, "default")
+            : renderTag(viewModel.guidedQuestionKind, "default")}
         </div>
 
         <article class="concept-explanation-hero">
@@ -63,26 +128,20 @@ export function renderExplanationCard(viewModel) {
           <p>${escapeHtml(guidedExplanation?.what || guidedStep.notice || guidedStep.prompt)}</p>
         </article>
 
-        <div class="concept-explanation-grid">
-          <article class="concept-explanation-item">
-            <strong>Why this matters</strong>
-            <p>${escapeHtml(guidedExplanation?.why || "This step links the code block, runtime event, and ROS concept together.")}</p>
-          </article>
-          <article class="concept-explanation-item">
-            <strong>ROS concept</strong>
-            <p>${escapeHtml(guidedExplanation?.concept || viewModel.activeEvent?.eventType || "runtime")}</p>
-          </article>
-          <article class="concept-explanation-item">
-            <strong>Code ↔ graph mapping</strong>
-            <p>${escapeHtml(guidedExplanation?.mapping || "The focused code and graph elements describe the same runtime behavior from two viewpoints.")}</p>
-          </article>
-          <article class="concept-explanation-item">
-            <strong>Next step</strong>
-            <p>${escapeHtml(viewModel.guidedCanAdvance
-              ? "Move to the next guided step when you are ready."
-              : "Use the prompt card above to answer or reveal this step before continuing.")}</p>
-          </article>
-        </div>
+        ${renderExplanationItems([
+          {
+            title: "Why it matters",
+            text: combineExplanation(
+              [guidedExplanation?.concept, guidedExplanation?.why],
+              "This step links the highlighted code, runtime event, and ROS idea."
+            ),
+          },
+          {
+            title: "Code and ROS link",
+            text: guidedExplanation?.mapping
+              || "The focused code block and graph elements are two views of the same runtime behavior.",
+          },
+        ])}
       </div>
     `;
   }
@@ -94,10 +153,7 @@ export function renderExplanationCard(viewModel) {
   if (!event) {
     return `
       <div class="concept-explanation-panel">
-        <div class="empty-state">
-          <h3>No runtime event selected</h3>
-          <p>Choose an example and an event to see the beginner-friendly explanation.</p>
-        </div>
+        ${renderEmptyState("No event selected.", "Select a step to see details.")}
       </div>
     `;
   }
@@ -106,15 +162,15 @@ export function renderExplanationCard(viewModel) {
     <div class="concept-explanation-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Why did this run?</p>
+          <p class="eyebrow">What just happened</p>
           <h3>${escapeHtml(event.label)}</h3>
         </div>
-        ${renderPill(event.eventType, event.eventType === "feedback" || event.eventType === "result" ? "warning" : "accent")}
+        ${renderPill(renderStepKindLabel(event.eventType), renderStepTone(event.eventType))}
       </div>
 
       <div class="concept-explanation-tags">
         ${block ? renderTag(block.label, "default") : ""}
-        ${event.messagePreview ? renderTag(event.messagePreview, "warning") : ""}
+        ${renderPreviewTag(event.messagePreview, event.eventType)}
       </div>
 
       <article class="concept-explanation-hero">
@@ -122,24 +178,25 @@ export function renderExplanationCard(viewModel) {
         <p>${escapeHtml(explanation?.what || event.timelineText || event.label)}</p>
       </article>
 
-      <div class="concept-explanation-grid">
-        <article class="concept-explanation-item">
-          <strong>Why</strong>
-          <p>${escapeHtml(explanation?.why || "This event follows from the previous runtime step in the example.")}</p>
-        </article>
-        <article class="concept-explanation-item">
-          <strong>ROS concept</strong>
-          <p>${escapeHtml(explanation?.concept || event.eventType)}</p>
-        </article>
-        <article class="concept-explanation-item">
-          <strong>Graph change</strong>
-          <p>${escapeHtml(explanation?.graph || "The runtime graph highlights the objects and edges active during this step.")}</p>
-        </article>
-        <article class="concept-explanation-item">
-          <strong>Code cause</strong>
-          <p>${escapeHtml(explanation?.code || (block ? `${block.label} is the active code section.` : "The highlighted code block caused this event."))}</p>
-        </article>
-      </div>
+      ${renderExplanationItems([
+        {
+          title: "Why it happened",
+          text: combineExplanation(
+            [explanation?.concept, explanation?.why],
+            "This step follows from the previous runtime event in the example."
+          ),
+        },
+        {
+          title: "Code and ROS link",
+          text: combineExplanation(
+            [
+              explanation?.graph,
+              explanation?.code || (block ? `${block.label} is the active code section.` : ""),
+            ],
+            "The highlighted code block and graph elements describe the same runtime step."
+          ),
+        },
+      ])}
     </div>
   `;
 }

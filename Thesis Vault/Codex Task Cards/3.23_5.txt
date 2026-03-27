@@ -1,0 +1,41 @@
+⏺ Task Card — Changing header panel
+
+  Task type
+
+  UI Polish
+
+  Goal
+
+  The intro panel should be collapsible or the height of it should be reduced significantly.
+
+  Problem
+
+  Currently, the intro panel takes up a good amount of space while providing minimal payoff for the user. 
+  There is no important information for the user to understand there, just toggles, and the panel takes up too much space.
+
+  Expected behavior
+  After this change:
+    - The intro panel is collapsible or it's height has been reduced
+    - Visually there is less clutter on the page
+    - Functionally nothing has changed. 
+
+  Context
+
+  File: Pyscript/src/ui/pages/concept-code.js
+
+  Constraints
+
+  - Do not change any JavaScript behavior, state management, or event handling
+  - Do not change the advanced/experimental panel (it stays last)
+  - Do not remove any components — only reorder explanation and timeline
+  - Responsive behavior at 1280px, 900px, and 720px breakpoints must remain
+  intact
+
+  Deliverable format
+
+  Return:
+  1. Diagnosis or plan
+  2. Files changed
+  3. Key behavior change 
+  4. Validation performed
+  5. Risks / follow-ups

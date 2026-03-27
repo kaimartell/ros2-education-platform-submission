@@ -1,0 +1,47 @@
+⏺ Task Card — Change playback controls 
+
+  Task type
+
+  UI Polish
+
+  Goal
+
+  The playback controls above the main grid should be moved, maybe into a sticky bar. beginners should see the
+  play/stop/restart buttons immediately, and they should be accessible across the page, but also out of the way. 
+
+  Problem
+
+  The playback controls are buried and inaccessible or placed in strange area. They also aren't immediately recognizable.
+
+  Expected behavior
+
+  After this change:
+  - the playback controls are accessible across the page
+  - the playback controls are differentiable from the page and the other components
+
+  Context
+
+  File: Pyscript/src/ui/pages/concept-code.js
+
+  Constraints
+
+  - Do not change any JavaScript behavior, state management, or event handling
+  - Do not change the advanced/experimental panel (it stays last)
+  - Do not remove any components — only reorder explanation and timeline
+  - Responsive behavior at 1280px, 900px, and 720px breakpoints must remain
+  intact
+
+  Acceptance criteria
+
+  1. The playback controls are persistently visible or pinned
+  2. The playback controls function properly
+  3. Beginners can easily identify the playback controls. 
+
+  Deliverable format
+
+  Return:
+  1. Diagnosis or plan
+  2. Files changed
+  3. Key behavior change 
+  4. Validation performed
+  5. Risks / follow-ups

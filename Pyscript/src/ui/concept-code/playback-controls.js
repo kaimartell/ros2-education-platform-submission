@@ -1,38 +1,50 @@
-import { escapeHtml, renderPill } from "../utils.js";
-
-const SPEED_OPTIONS = [0.6, 0.7, 0.8, 1];
+import { escapeHtml } from "../utils.js";
 
 export function renderPlaybackControls(state, viewModel) {
   const playback = state.conceptCode.playback;
-  const activeEvent = viewModel.activeEvent;
 
   return `
     <div class="concept-playback-strip">
       <div class="concept-playback-buttons">
         <button
           type="button"
-          class="accent"
+          class="concept-playback-icon accent"
           data-action="${playback.status === "playing" ? "concept-pause" : "concept-play"}"
           ${viewModel.events.length ? "" : "disabled"}
+          title="${playback.status === "playing" ? "Pause" : "Play"}"
+          aria-label="${playback.status === "playing" ? "Pause" : "Play"}"
         >
-          ${playback.status === "playing" ? "Pause" : "Play"}
+          ${playback.status === "playing" ? "&#x23F8;" : "&#x25B6;"}
         </button>
-        <button type="button" data-action="concept-step" ${viewModel.events.length ? "" : "disabled"}>Step</button>
-        <button type="button" data-action="concept-reset" ${viewModel.events.length ? "" : "disabled"}>Restart</button>
-      </div>
-
-      <div class="concept-playback-status">
-        ${renderPill(playback.status === "playing" ? "Playing" : "Paused", playback.status === "playing" ? "success" : "default")}
-        ${renderPill(activeEvent ? activeEvent.label : "No event", activeEvent ? "accent" : "warning")}
+        <button
+          type="button"
+          class="concept-playback-icon"
+          data-action="concept-step"
+          ${viewModel.events.length ? "" : "disabled"}
+          title="Step forward"
+          aria-label="Step forward"
+        >&#x23ED;</button>
+        <button
+          type="button"
+          class="concept-playback-icon"
+          data-action="concept-reset"
+          ${viewModel.events.length ? "" : "disabled"}
+          title="Restart"
+          aria-label="Restart"
+        >&#x21BB;</button>
       </div>
 
       <div class="concept-playback-speed">
-        <label class="field-label" for="concept-speed">Pace</label>
-        <select id="concept-speed" data-bind="concept-speed-select">
-          ${SPEED_OPTIONS.map((speed) => `
-            <option value="${escapeHtml(String(speed))}" ${playback.speed === speed ? "selected" : ""}>${escapeHtml(`${speed}x`)}</option>
-          `).join("")}
-        </select>
+        <label class="field-label" for="concept-speed">Playback speed</label>
+        <input
+          type="number"
+          id="concept-speed"
+          data-bind="concept-speed-select"
+          min="0.1"
+          max="2"
+          step="0.1"
+          value="${escapeHtml(String(playback.speed))}"
+        >
       </div>
     </div>
   `;

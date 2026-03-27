@@ -2,8 +2,8 @@ import { escapeHtml, feedbackTone, formatCount, renderInlineList, renderPill, re
 
 function renderNodeCard(name, detail, isSelected) {
   const summary = detail
-    ? `${detail.publishing.length} pub | ${detail.subscribing.length} sub | ${detail.services.length} svc`
-    : "Relationships load on demand";
+    ? `Publishes ${detail.publishing.length} | Subscribes ${detail.subscribing.length} | Services ${detail.services.length}`
+    : "Select to load relationships";
 
   return `
     <button
@@ -21,7 +21,7 @@ function renderNodeCard(name, detail, isSelected) {
 function renderTopicJumpList(items) {
   return renderInlineList(
     items,
-    "No topics to show yet.",
+    "No topics for this node.",
     (item) => `
       <button
         type="button"
@@ -38,7 +38,7 @@ function renderTopicJumpList(items) {
 function renderServiceList(items, selectedServiceName) {
   return renderInlineList(
     items,
-    "No services to show yet.",
+    "No services for this node.",
     (item) => `
       <button
         type="button"
@@ -52,12 +52,12 @@ function renderServiceList(items, selectedServiceName) {
   );
 }
 
-function renderNodeDetail(selectedNodeName, detail, state) {
+function renderNodeDetail(selectedNodeName, detail, showServices, selectedServiceName) {
   if (!selectedNodeName) {
     return `
       <div class="empty-state">
-        <h3>Select a node</h3>
-        <p>Pick a node from the list to see how it fits into the ROS 2 system.</p>
+        <h3>No node selected.</h3>
+        <p>Select a node to see details.</p>
       </div>
     `;
   }
@@ -66,7 +66,7 @@ function renderNodeDetail(selectedNodeName, detail, state) {
     return `
       <div class="empty-state">
         <h3>Loading node details</h3>
-        <p>The browser is asking rosapi for publishers, subscribers, and services for ${escapeHtml(selectedNodeName)}.</p>
+        <p>Checking what ${escapeHtml(selectedNodeName)} publishes, subscribes to, and offers as services.</p>
       </div>
     `;
   }
@@ -78,148 +78,126 @@ function renderNodeDetail(selectedNodeName, detail, state) {
           <p class="eyebrow">Selected Node</p>
           <h2>${escapeHtml(detail.name)}</h2>
         </div>
-        ${renderPill("Node", "accent")}
       </div>
 
       <div class="facts-grid">
         <article class="fact-card">
-          <span class="fact-label">Package</span>
-          <strong>Not exposed by rosapi</strong>
+          <span class="fact-label">Publishes to</span>
+          <strong>${escapeHtml(formatCount(detail.publishing.length, "topic"))}</strong>
         </article>
         <article class="fact-card">
-          <span class="fact-label">Publishes</span>
-          <strong>${detail.publishing.length}</strong>
+          <span class="fact-label">Subscribes to</span>
+          <strong>${escapeHtml(formatCount(detail.subscribing.length, "topic"))}</strong>
         </article>
         <article class="fact-card">
-          <span class="fact-label">Subscribes</span>
-          <strong>${detail.subscribing.length}</strong>
-        </article>
-        <article class="fact-card">
-          <span class="fact-label">Services</span>
-          <strong>${detail.services.length}</strong>
+          <span class="fact-label">Offers</span>
+          <strong>${escapeHtml(formatCount(detail.services.length, "service"))}</strong>
         </article>
       </div>
 
-      <div class="callout callout-info">
-        Explanation placeholder: add a short lesson-specific description here later so beginners know why this node exists.
-      </div>
-
-      ${state.system.showTopics ? `
-        <section class="detail-section">
-          <div class="section-head">
-            <h3>Publishes</h3>
-            ${renderTag(formatCount(detail.publishing.length, "topic"))}
-          </div>
-          ${renderTopicJumpList(detail.publishing)}
-        </section>
-
-        <section class="detail-section">
-          <div class="section-head">
-            <h3>Subscribes</h3>
-            ${renderTag(formatCount(detail.subscribing.length, "topic"))}
-          </div>
-          ${renderTopicJumpList(detail.subscribing)}
-        </section>
-      ` : `
-        <div class="callout callout-muted">
-          Topic relationships are hidden. Turn on "Show topics" to see what this node publishes and subscribes to.
+      <section class="detail-section">
+        <div class="section-head">
+          <h3>Publishes</h3>
+          ${renderTag(formatCount(detail.publishing.length, "topic"))}
         </div>
-      `}
+        ${renderTopicJumpList(detail.publishing)}
+      </section>
 
-      ${state.system.showServices ? `
+      <section class="detail-section">
+        <div class="section-head">
+          <h3>Subscribes</h3>
+          ${renderTag(formatCount(detail.subscribing.length, "topic"))}
+        </div>
+        ${renderTopicJumpList(detail.subscribing)}
+      </section>
+
+      ${showServices ? `
         <section class="detail-section">
           <div class="section-head">
             <h3>Services</h3>
             ${renderTag(formatCount(detail.services.length, "service"))}
           </div>
-          ${renderServiceList(detail.services, state.system.selectedServiceName)}
+          ${renderServiceList(detail.services, selectedServiceName)}
         </section>
-      ` : `
-        <div class="callout callout-muted">
-          Service relationships are hidden. Turn on "Show services" to inspect or test services.
-        </div>
-      `}
+      ` : ""}
     </section>
   `;
 }
 
 function renderServiceTester(state, selectedNodeDetail, selectedServiceDetail) {
-  if (!state.system.showServices) {
+  if (!state.system.showServices || !selectedNodeDetail) {
     return "";
   }
 
-  const availableServices = selectedNodeDetail?.services?.length
-    ? selectedNodeDetail.services
-    : state.graph.services;
+  const availableServices = selectedNodeDetail.services;
   const selectedValue = availableServices.includes(state.system.selectedServiceName)
     ? state.system.selectedServiceName
     : "";
   const tone = feedbackTone(state.system.serviceResult.status);
+  const hasFeedback = state.system.serviceResult.status !== "idle";
 
   return `
     <section class="detail-section service-tester">
       <div class="section-head">
         <div>
           <p class="eyebrow">Service Tools</p>
-          <h3>Call a service</h3>
+          <h3>Try a service call</h3>
         </div>
-        ${renderPill(
-          selectedNodeDetail?.services?.length ? "Using selected node services" : "Using all discovered services",
-          "default"
-        )}
       </div>
 
       ${availableServices.length ? `
-        <label class="field-label" for="service-select">Service name</label>
-        <select id="service-select" data-bind="service-select">
-          <option value="">Choose a service</option>
-          ${availableServices.map((serviceName) => `
-            <option value="${escapeHtml(serviceName)}" ${selectedValue === serviceName ? "selected" : ""}>
-              ${escapeHtml(serviceName)}
-            </option>
-          `).join("")}
-        </select>
-
         <div class="facts-grid facts-grid-two">
           <article class="fact-card">
-            <span class="fact-label">Service type</span>
-            <strong>${escapeHtml(selectedServiceDetail?.type || "Load a service to inspect its type")}</strong>
+            <span class="fact-label">Selected service</span>
+            <strong>${escapeHtml(selectedValue || "Select a service above")}</strong>
           </article>
           <article class="fact-card">
-            <span class="fact-label">Selected from</span>
-            <strong>${escapeHtml(selectedNodeDetail?.name || "Global service list")}</strong>
+            <span class="fact-label">Service type</span>
+            <strong>${escapeHtml(selectedServiceDetail?.type || "Select a service to inspect its type")}</strong>
           </article>
         </div>
 
-        <div class="action-row">
-          <button type="button" data-action="insert-service-template" ${selectedValue ? "" : "disabled"}>
-            Use template
-          </button>
-          <button type="button" class="accent" data-action="call-service" ${selectedValue ? "" : "disabled"}>
-            Call service
-          </button>
-        </div>
+        ${selectedValue ? `
+          <div class="action-row">
+            <button type="button" data-action="insert-service-template">
+              Use template
+            </button>
+            <button type="button" class="accent" data-action="call-service">
+              Call service
+            </button>
+          </div>
 
-        <textarea
-          class="payload-box"
-          spellcheck="false"
-          data-bind="service-request"
-        >${escapeHtml(state.system.serviceRequestText)}</textarea>
+          <label class="field-label" for="system-service-request">Request JSON</label>
+          <textarea
+            id="system-service-request"
+            class="payload-box"
+            spellcheck="false"
+            data-bind="service-request"
+          >${escapeHtml(state.system.serviceRequestText)}</textarea>
 
-        <div class="callout callout-${tone}">
-          ${escapeHtml(state.system.serviceResult.status === "success"
-            ? "Service call completed."
-            : state.system.serviceResult.status === "error"
-              ? "Service call failed."
-              : state.system.serviceResult.status === "warning"
-                ? "Service call blocked."
-                : "Service tester ready.")}
-        </div>
-        <pre class="code-box">${escapeHtml(state.system.serviceResult.message)}</pre>
+          ${hasFeedback ? `
+            <div class="callout callout-${tone}">
+              ${escapeHtml(state.system.serviceResult.status === "success"
+                ? "Service call completed."
+                : state.system.serviceResult.status === "error"
+                  ? "Service call failed."
+                  : "Service call blocked.")}
+            </div>
+            <label class="field-label" for="system-service-response">Status and response</label>
+            <pre id="system-service-response" class="code-box">${escapeHtml(state.system.serviceResult.message)}</pre>
+          ` : `
+            <p class="muted small">Use template to fill a request, then call the service.</p>
+          `}
+        ` : `
+          <div class="empty-state">
+            <h3>No service selected.</h3>
+            <p>Select a service above to inspect or call it.</p>
+          </div>
+        `}
       ` : `
         <div class="empty-state">
-          <h3>No services available</h3>
-          <p>Refresh the graph after connecting, or select a node that offers services.</p>
+          <h3>No services on this node.</h3>
+          <p>Select a different node to explore its services.</p>
         </div>
       `}
     </section>
@@ -239,26 +217,23 @@ export function renderSystemPage(state, context) {
   const nodeStatusTone = !state.connection.connected || state.graph.hydration.nodes === "loading"
     ? "warning"
     : "success";
+  const emptyNodeState = search
+    ? `<div class="empty-state"><h3>No nodes match.</h3><p>Try a shorter search.</p></div>`
+    : !state.connection.connected
+      ? `<div class="empty-state"><h3>No nodes yet.</h3><p>Connect to load nodes.</p></div>`
+      : state.graph.hydration.nodes === "loading"
+        ? `<div class="empty-state"><h3>Loading nodes</h3><p>Checking the ROS graph for available nodes.</p></div>`
+        : `<div class="empty-state"><h3>No nodes found.</h3><p>Refresh the graph to check again.</p></div>`;
 
   return `
     <section class="page-stack">
       <article class="panel page-intro">
         <div class="page-intro-copy">
           <p class="eyebrow">System</p>
-          <h2>See the ROS graph one node at a time.</h2>
-          <p class="lead">
-            This page uses a beginner-friendly node view instead of a dense graph canvas. Select a node to see what it publishes,
-            what it listens to, and which services it offers.
-          </p>
+          <h2>Select a node to see what it publishes and subscribes to.</h2>
         </div>
         <div class="page-intro-side">
           ${renderPill(nodeStatusLabel, nodeStatusTone)}
-          <div class="architecture-strip">
-            <span>Browser</span>
-            <span>rosbridge</span>
-            <span>rosapi</span>
-            <span>Nodes</span>
-          </div>
         </div>
       </article>
 
@@ -269,7 +244,6 @@ export function renderSystemPage(state, context) {
               <p class="eyebrow">Nodes</p>
               <h2>${state.graph.nodes.length}</h2>
             </div>
-            ${renderTag("Node browser")}
           </div>
 
           <label class="field-label" for="system-search">Search nodes</label>
@@ -284,12 +258,8 @@ export function renderSystemPage(state, context) {
 
           <div class="toggle-row">
             <label class="toggle">
-              <input type="checkbox" data-bind="system-show-topics" ${state.system.showTopics ? "checked" : ""}>
-              <span>Show topics</span>
-            </label>
-            <label class="toggle">
               <input type="checkbox" data-bind="system-show-services" ${state.system.showServices ? "checked" : ""}>
-              <span>Show services</span>
+              <span>Show service tools</span>
             </label>
           </div>
 
@@ -300,12 +270,17 @@ export function renderSystemPage(state, context) {
                 context.getDetail("node", name),
                 state.system.selectedNodeName === name
               )).join("")
-              : `<div class="empty-state"><h3>No nodes match</h3><p>Try a shorter search or refresh the graph.</p></div>`}
+              : emptyNodeState}
           </div>
         </section>
 
         <section class="panel detail-panel">
-          ${renderNodeDetail(state.system.selectedNodeName, selectedNodeDetail, state)}
+          ${renderNodeDetail(
+            state.system.selectedNodeName,
+            selectedNodeDetail,
+            state.system.showServices,
+            state.system.selectedServiceName
+          )}
           ${renderServiceTester(state, selectedNodeDetail, selectedServiceDetail)}
         </section>
       </div>

@@ -1,4 +1,4 @@
-import { escapeHtml, renderPill, renderTag } from "../utils.js";
+import { escapeHtml, renderPill } from "../utils.js";
 import { formatMessagePreview } from "./message-preview.js";
 
 export const FLOW_PLACEHOLDER_SOURCE = "Browser Publisher";
@@ -339,17 +339,10 @@ function renderTokens(events, layout, now) {
 export function renderTopicFlowVisualizer(detail, flowState) {
   if (!detail) {
     return `
-      <section class="detail-section flow-visualizer">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Visualizer</p>
-            <h3>Pub/Sub Flow Visualizer</h3>
-          </div>
-          ${renderPill("Select a topic", "default")}
-        </div>
+      <section class="flow-visualizer">
         <div class="empty-state">
-          <h3>No topic selected</h3>
-          <p>Choose a topic first to see a conceptual pub/sub diagram.</p>
+          <h3>No topic selected.</h3>
+          <p>Select a topic to see the message path.</p>
         </div>
       </section>
     `;
@@ -358,41 +351,30 @@ export function renderTopicFlowVisualizer(detail, flowState) {
   const activeEvents = Array.isArray(flowState?.events) ? flowState.events : [];
   const graph = extractTopicFlowGraph(detail, activeEvents);
   const layout = buildFlowLayout(graph);
-  const latestEvent = activeEvents.length ? activeEvents[activeEvents.length - 1] : null;
   const now = Date.now();
   const placeholderSourceUsed = activeEvents.some((event) => event.sourceLabel === FLOW_PLACEHOLDER_SOURCE);
   const notes = [];
 
   if (!graph.actualPublisherLabels.length) {
-    notes.push("No publishers are currently reported for this topic, so the diagram uses Browser Publisher as a teaching placeholder.");
+    notes.push("Showing browser as publisher.");
   } else if (placeholderSourceUsed) {
-    notes.push("This publish animation starts from Browser Publisher because the message came from the browser UI, not from a ROS node discovered through rosapi.");
+    notes.push("Showing browser as publisher for this message.");
   }
 
   if (!graph.subscriberLabels.length) {
-    notes.push("No subscribers are currently reported for this topic, so the message animation stops at the topic.");
+    notes.push("No subscribers reported.");
   }
 
   return `
-    <section class="detail-section flow-visualizer">
+    <section class="flow-visualizer">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Visualizer</p>
-          <h3>Pub/Sub Flow Visualizer</h3>
+          <h3>Message path</h3>
         </div>
-        ${renderPill(activeEvents.length ? "Animating message flow" : "Ready for publish demo", activeEvents.length ? "success" : "default")}
-      </div>
-
-      <p class="flow-caption">
-        Conceptual teaching animation only. The timing is intentionally slowed down so beginners can follow the message path.
-      </p>
-
-      <div class="flow-legend">
-        ${renderTag(`Topic: ${detail.name}`)}
-        ${renderTag(`Type: ${detail.type || "Unknown"}`)}
-        ${latestEvent
-          ? renderTag(`Preview: ${latestEvent.messagePreview}`, "accent")
-          : renderTag("Publish a message to animate the flow", "default")}
+        ${renderPill(
+          activeEvents.length ? "Animating message flow" : "Publish to animate",
+          activeEvents.length ? "success" : "default"
+        )}
       </div>
 
       <div class="flow-canvas">
@@ -400,7 +382,7 @@ export function renderTopicFlowVisualizer(detail, flowState) {
           class="flow-svg"
           viewBox="0 0 ${layout.width} ${layout.height}"
           preserveAspectRatio="xMidYMid meet"
-          aria-label="Pub/Sub flow visualizer"
+          aria-label="Topic message path"
           role="img"
         >
           <defs>

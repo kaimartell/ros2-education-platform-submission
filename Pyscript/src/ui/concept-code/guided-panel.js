@@ -10,6 +10,32 @@ function feedbackTone(status) {
   return "callout-info";
 }
 
+function renderEmptyState(title, body) {
+  return `
+    <div class="empty-state">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(body)}</p>
+    </div>
+  `;
+}
+
+function renderPracticeList(items) {
+  const parts = (items || []).filter(Boolean);
+  if (!parts.length) {
+    return "";
+  }
+
+  if (parts.length === 1) {
+    return parts[0];
+  }
+
+  if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`;
+  }
+
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
 function renderChoiceOptions(viewModel) {
   const step = viewModel.guidedStep;
   if (!step || !Array.isArray(step.choices) || !step.choices.length) {
@@ -88,12 +114,12 @@ function renderCompletion(viewModel, nextTemplate) {
       </div>
 
       <p class="concept-panel-copy">
-        You practiced mapping runtime behavior to Python structure, ROS concepts, and event order for this example.
+        You practiced linking the code, graph, and event order for this example.
       </p>
 
-      <div class="concept-runtime-tags">
-        ${(viewModel.guidedLesson?.practiced || []).map((item) => renderTag(item, "default")).join("")}
-      </div>
+      <p class="concept-panel-copy">
+        ${escapeHtml(`You practiced: ${renderPracticeList(viewModel.guidedLesson?.practiced)}.`)}
+      </p>
 
       <div class="concept-guided-controls">
         <button type="button" class="accent" data-action="concept-guided-restart">Replay lesson</button>
@@ -118,10 +144,7 @@ export function renderGuidedPanel(viewModel, options = {}) {
   if (!viewModel.guidedLesson) {
     return `
       <div class="concept-guided-panel">
-        <div class="empty-state">
-          <h3>No guided lesson available</h3>
-          <p>This example does not have a guided walkthrough yet.</p>
-        </div>
+        ${renderEmptyState("No guided lesson.", "Select another example to use Guided mode.")}
       </div>
     `;
   }
@@ -134,10 +157,7 @@ export function renderGuidedPanel(viewModel, options = {}) {
   if (!step) {
     return `
       <div class="concept-guided-panel">
-        <div class="empty-state">
-          <h3>No guided step selected</h3>
-          <p>Restart the lesson to begin the guided walkthrough.</p>
-        </div>
+        ${renderEmptyState("No lesson step selected.", "Restart the lesson to continue.")}
       </div>
     `;
   }
@@ -159,21 +179,14 @@ export function renderGuidedPanel(viewModel, options = {}) {
         <span class="concept-guided-progress-bar" style="width: ${Math.round(viewModel.guidedProgressRatio * 100)}%;"></span>
       </div>
 
-      <p class="concept-panel-copy">
-        ${escapeHtml(viewModel.guidedLesson.summary)}
-      </p>
-
       <article class="concept-guided-prompt">
         <strong>Prompt</strong>
         <p>${escapeHtml(step.prompt)}</p>
-      </article>
-
-      ${step.notice ? `
-        <div class="concept-guided-notice">
+        ${step.notice ? `
           <strong>What to notice</strong>
           <p>${escapeHtml(step.notice)}</p>
-        </div>
-      ` : ""}
+        ` : ""}
+      </article>
 
       ${renderChoiceOptions(viewModel)}
 
@@ -193,8 +206,8 @@ export function renderGuidedPanel(viewModel, options = {}) {
       ${viewModel.guidedShowExplanation ? `
         <div class="callout callout-info">
           ${escapeHtml(viewModel.guidedState.answerCorrect === true
-            ? "Read the explanation below, then move to the next step when you are ready."
-            : "The answer is revealed below so you can keep moving through the lesson." )}
+            ? "Read the explanation below, then continue when you are ready."
+            : "The explanation is open below so you can keep moving." )}
         </div>
       ` : ""}
 
