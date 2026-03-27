@@ -101,39 +101,56 @@ If your task requires a CSS change, a new utility function, a new state field, o
 
 ## Cyclical agent workflow
 
-Each agent follows this loop. Do not stop after the must-fix tasks — continue discovering and improving until your page is as clean and beginner-friendly as possible.
+You work in a **loop**. Each iteration: read the worklist, fix unchecked items, critique the page, discover new issues, implement them, then re-read the worklist again. The user may add new tasks to your worklist while you work. You pick them up on the next iteration.
 
-### Phase 1: Fix known issues
-1. Read your worklist file (`worklists/<page>.md`)
-2. Read every file in your owned set
-3. Work through **Must fix** items first, then **Should improve**, then **Cross-page patterns**
-4. For each completed item, mark it `[x]` in your worklist file
-5. Validate each fix (see Validation section below)
+**Do not stop after one pass.** Keep looping until there are zero unchecked items in your worklist AND you cannot find any more improvements.
 
-### Phase 2: Discover new improvements
-6. Re-read your page's rendered output holistically as a beginner student would experience it
-7. Ask yourself:
-   - Is any text still too long, too technical, or apologetic?
-   - Are there callouts, pills, tags, or sections that don't help the student learn?
-   - Are empty states clear and consistent?
-   - Is the visual hierarchy clean — does the most important thing stand out?
-   - Are there any dead-code paths, unused variables, or commented-out blocks?
-   - Could any section be simpler without losing teaching value?
-8. For each new issue found, add it to the **Agent-discovered improvements** section of your worklist file
+### The loop
 
-### Phase 3: Implement discoveries
-9. Implement the improvements you discovered
-10. Mark each one `[x]` in your worklist file as you complete it
-11. Validate each change
+```
+REPEAT {
+  1. READ your worklist file (worklists/<page>.md) — look for ALL unchecked [ ] items
+     across every section: Must fix, Should improve, Cross-page patterns,
+     Regression fixes, Agent-discovered improvements, and User input.
 
-### Phase 4: Report
-12. Return a deliverable with:
-    - **Completed tasks** — what was fixed from the original worklist
-    - **Discovered improvements** — what new issues you found and fixed
-    - **Files changed** — list with brief description of each change
-    - **Shared file dependencies** — anything that needs a CSS/state/handler change you couldn't make
-    - **Validation performed** — what was verified
-    - **Remaining ideas** — anything you noticed but didn't fix (add these as unchecked items in your worklist)
+  2. READ every file in your owned set to see current state.
+
+  3. FIX every unchecked item. Mark each [x] as you complete it.
+
+  4. CRITIQUE the page as a beginner student:
+     - Read the full rendered HTML your page produces, top to bottom.
+     - First impression: does the page explain itself in under 5 seconds?
+     - Jargon: list every word a mech-e student wouldn't know. Can it be simpler?
+     - Dead weight: what could be removed with no loss to learning?
+     - Visual hierarchy: does the most important thing stand out?
+     - Action clarity: is every interactive element obvious?
+     - Emotional tone: welcoming and calm, or dense and intimidating?
+
+  5. DISCOVER new issues from your critique. For each one:
+     - Add it as an unchecked [ ] item under "Agent-discovered improvements"
+     - Implement it immediately
+     - Mark it [x]
+
+  6. RE-READ your worklist file again.
+     - If the user added new items under "User input", fix those too.
+     - If any items are still unchecked, go back to step 3.
+
+  7. EXIT the loop only when:
+     - Every item in every section is [x] or explicitly marked as blocked
+     - Your critique found nothing new to fix
+     - You re-read the worklist and no new user items appeared
+}
+```
+
+### After the loop — final report
+
+Return:
+- **Passes completed** — how many loop iterations you did
+- **Completed tasks** — everything fixed, grouped by worklist section
+- **Files changed** — list with brief description of each change
+- **Shared file dependencies** — anything that needs a CSS/state/handler change you couldn't make
+- **Validation performed** — what was verified
+- **Remaining weaknesses** — the single weakest thing still on the page (add as unchecked item in worklist)
 
 ---
 
@@ -210,10 +227,9 @@ Always report:
 ## Definition of done
 
 Your work is done when:
-- All must-fix items are checked off
-- All should-improve items are checked off or noted as blocked (with reason)
-- Cross-page patterns are applied within your files
-- You have discovered and implemented at least one additional improvement
-- Your worklist file is fully updated with completion status
-- Shared file dependencies (if any) are clearly reported
+- You have completed at least 2 full loop iterations
+- Every worklist item across all sections is `[x]` or marked as blocked with a reason
+- You re-read the worklist one final time and found no new user items
+- Your critique pass found nothing new to fix
+- Your final report is returned with all required sections
 - The page reads as a clean, calm, beginner-friendly teaching tool

@@ -1,24 +1,45 @@
 import { escapeHtml, renderTag } from "../utils.js";
 
+function renderStepKindLabel(eventType) {
+  switch (eventType) {
+    case "setup":
+      return "Setup";
+    case "publish":
+      return "Message move";
+    case "runtime":
+      return "Waiting";
+    case "callback":
+      return "Reply";
+    case "feedback":
+      return "Progress";
+    case "result":
+      return "Result";
+    case "goal":
+      return "Goal";
+    default:
+      return eventType || "Step";
+  }
+}
+
 export function renderEventTimeline(viewModel) {
   const title = viewModel.guidedMode
-    ? `Runtime event ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`
+    ? `Lesson step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`
     : `Step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`;
 
   return `
     <div class="concept-timeline-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Event timeline</p>
+          <p class="eyebrow">Step timeline</p>
           <h3>${escapeHtml(title)}</h3>
         </div>
-        ${renderTag(viewModel.guidedMode ? "Read-only in Guided mode" : `${viewModel.events.length} events`, "accent")}
+        ${renderTag(viewModel.guidedMode ? "Read-only in Guided mode" : `${viewModel.events.length} steps`, "accent")}
       </div>
 
       <p class="concept-panel-copy">
         ${escapeHtml(viewModel.guidedMode
-          ? "Guided mode keeps the timeline pinned to the current teaching step so the sequence stays calm and focused."
-          : "Drag the rail or click a step to move through the sequence at your own pace.")}
+          ? "Guided mode keeps the current step fixed so you can stay focused."
+          : "Click a step or drag the rail to move through the sequence.")}
       </p>
 
       <div class="concept-rail-shell ${viewModel.guidedMode ? "guided" : ""}">
@@ -54,12 +75,12 @@ export function renderEventTimeline(viewModel) {
         <summary class="concept-timeline-toggle">
           <span class="concept-timeline-toggle-copy">
             <strong>
-              <span class="concept-timeline-toggle-closed">Show all events</span>
-              <span class="concept-timeline-toggle-open">Hide full event list</span>
+              <span class="concept-timeline-toggle-closed">Show full list</span>
+              <span class="concept-timeline-toggle-open">Hide full list</span>
             </strong>
-            <span>${escapeHtml(viewModel.guidedMode ? "Optional full step list" : "Optional detailed event list")}</span>
+            <span>${escapeHtml(viewModel.guidedMode ? "Every lesson step in list form" : "Every step in list form")}</span>
           </span>
-          ${renderTag(`${viewModel.events.length} events`, "accent")}
+          ${renderTag(`${viewModel.events.length} steps`, "accent")}
         </summary>
 
         <div class="concept-timeline-list">
@@ -74,7 +95,7 @@ export function renderEventTimeline(viewModel) {
                 <strong>${escapeHtml(event.label)}</strong>
                 <span>${escapeHtml(event.timelineText || event.label)}</span>
               </span>
-              <span class="concept-timeline-meta">${escapeHtml(event.eventType)}</span>
+              <span class="concept-timeline-meta">${escapeHtml(renderStepKindLabel(event.eventType))}</span>
             </button>
           `).join("")}
         </div>

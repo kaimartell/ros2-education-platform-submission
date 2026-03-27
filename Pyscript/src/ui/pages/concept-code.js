@@ -4,15 +4,7 @@ import { renderGuidedPanel } from "../concept-code/guided-panel.js";
 import { buildConceptCodeViewModel, getConceptCodeTemplates } from "../concept-code/model.js";
 import { renderRuntimeGraphPanel } from "../concept-code/runtime-graph.js";
 import { renderEventTimeline } from "../concept-code/timeline.js";
-import { escapeHtml, renderInlineList, renderPill, renderTag } from "../utils.js";
-
-function renderAdapterCandidates(candidates) {
-  return renderInlineList(
-    candidates,
-    "No candidate teaching endpoints are visible yet.",
-    (candidate) => `<code class="code-chip">${escapeHtml(candidate)}</code>`
-  );
-}
+import { escapeHtml, renderPill } from "../utils.js";
 
 function renderConceptExampleSelector(state, templates) {
   return `
@@ -60,46 +52,23 @@ function renderConceptToolbar(state, templates) {
       <span class="concept-toolbar-title eyebrow">Concept + Code</span>
       ${renderConceptExampleSelector(state, templates)}
       ${renderConceptModeSwitch(state)}
-      ${state.conceptCode.introCollapsed ? `
-        <button
-          type="button"
-          class="concept-toolbar-info"
-          data-action="concept-toggle-intro"
-          title="About this page"
-          aria-label="About this page"
-        >
-          <span aria-hidden="true">&#x2139;</span>
-        </button>
-      ` : ""}
     </nav>
   `;
 }
 
-function renderConceptWelcome(state, viewModel) {
-  if (state.conceptCode.introCollapsed) {
-    return "";
-  }
-
+function renderConceptWelcome(viewModel) {
   return `
     <article class="panel concept-welcome-panel">
-      <h3 class="concept-welcome-heading">
-        <button type="button" class="concept-welcome-toggle" data-action="concept-toggle-intro">
-          <span>See ROS ideas and Python code move together.</span>
-          <span class="concept-welcome-chevron" aria-hidden="true">&#x25BE;</span>
-        </button>
-      </h3>
-      <p class="lead">
-        This page is built for beginners who understand nodes, topics, and actions conceptually but want help connecting those ideas
-        to the Python methods and callbacks that actually run.
-      </p>
-      <div class="concept-welcome-side">
-        <div class="concept-runtime-tags">
-          ${renderPill(state.conceptCode.mode === "guided" ? "Guided lesson" : "Demo playback", "accent")}
-          ${renderTag(viewModel.template.shortLabel, "accent")}
-          ${viewModel.template.concepts.map((concept) => renderTag(concept, "default")).join("")}
+      <div class="concept-guide-head">
+        <div>
+          <p class="eyebrow">Page intro</p>
+          <h3 class="concept-welcome-heading">See ROS ideas and Python code move together.</h3>
         </div>
-        <p class="concept-panel-copy">${escapeHtml(viewModel.template.summary)}</p>
+        ${renderPill(viewModel.guidedMode ? "Guided lesson" : "Explore mode", "accent")}
       </div>
+      <p class="lead">
+        Track one step at a time to see which Python block causes each ROS change.
+      </p>
     </article>
   `;
 }
@@ -107,18 +76,12 @@ function renderConceptWelcome(state, viewModel) {
 export function renderConceptCodePage(state) {
   const templates = getConceptCodeTemplates();
   const viewModel = buildConceptCodeViewModel(state);
-  const adapter = state.conceptCode.adapter;
   const nextTemplate = templates.find((template) => template.id !== viewModel.template.id) || null;
-  const experimentalTone = state.conceptCode.sourceMode === "live" && state.conceptCode.resolvedMode === "live"
-    ? "success"
-    : state.conceptCode.sourceMode === "live"
-      ? "warning"
-      : "default";
 
   return `
     <section class="page-stack concept-code-page">
       ${renderConceptToolbar(state, templates)}
-      ${renderConceptWelcome(state, viewModel)}
+      ${renderConceptWelcome(viewModel)}
 
       <div class="concept-main-grid">
         ${renderCodePanel(state, viewModel)}
@@ -128,7 +91,7 @@ export function renderConceptCodePage(state) {
       <section class="panel concept-guide-panel">
         <div class="concept-guide-head">
           <div>
-            <p class="eyebrow">${escapeHtml(viewModel.guidedMode ? "Guided lesson" : "Event sequence")}</p>
+            <p class="eyebrow">${escapeHtml(viewModel.guidedMode ? "Guided lesson" : "Step guide")}</p>
             <h3>${escapeHtml(viewModel.guidedMode
               ? (viewModel.guidedCompleted
                 ? "Lesson complete"
@@ -140,55 +103,15 @@ export function renderConceptCodePage(state) {
 
         <p class="concept-panel-copy">
           ${escapeHtml(viewModel.guidedMode
-            ? "Guided mode walks one concept mapping at a time. Answer, read the explanation, then continue."
-            : state.conceptCode.statusMessage || "Demo playback is the main learning path on this page.")}
+            ? (viewModel.guidedCompleted
+              ? "Review the key code and graph links from this lesson."
+              : "Answer the prompt, then compare the highlighted code and graph.")
+            : "Follow the active step to connect the code, graph, and explanation.")}
         </p>
 
       ${viewModel.guidedMode ? renderGuidedPanel(viewModel, { nextTemplate }) : ""}
       ${renderExplanationCard(viewModel)}
       ${renderEventTimeline(viewModel)}
-
-        <details class="concept-advanced-panel">
-          <summary>Advanced / experimental runtime trace</summary>
-          <div class="concept-advanced-body">
-            <p class="concept-panel-copy">
-              Demo playback is the primary teaching mode. Live runtime trace remains experimental and is intentionally de-emphasized.
-            </p>
-
-            <div class="concept-status-row">
-              <button
-                type="button"
-                class="${state.conceptCode.sourceMode === "demo" ? "active" : ""}"
-                data-action="concept-set-source-mode"
-                data-mode="demo"
-              >
-                Use demo mode
-              </button>
-              <button
-                type="button"
-                class="${state.conceptCode.sourceMode === "live" ? "active" : ""}"
-                data-action="concept-set-source-mode"
-                data-mode="live"
-                ${state.connection.connected ? "" : "disabled"}
-              >
-                Experimental trace
-              </button>
-              ${renderPill(adapter.available ? "Trace adapter detected" : "No live trace endpoint", experimentalTone)}
-            </div>
-
-            <div class="callout ${adapter.available ? "callout-info" : "callout-warning"}">
-              ${escapeHtml(adapter.message)}
-            </div>
-
-            <section class="detail-section">
-              <div class="section-head">
-                <h3>Detected backend hints</h3>
-                ${renderTag(`${adapter.candidates.length}`)}
-              </div>
-              ${renderAdapterCandidates(adapter.candidates)}
-            </section>
-          </div>
-        </details>
       </section>
     </section>
   `;

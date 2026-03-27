@@ -35,7 +35,7 @@ export function renderPlaybackControls(state, viewModel) {
       </div>
 
       <div class="concept-playback-speed">
-        <label class="field-label" for="concept-speed">Speed</label>
+        <label class="field-label" for="concept-speed">Playback speed</label>
         <input
           type="number"
           id="concept-speed"

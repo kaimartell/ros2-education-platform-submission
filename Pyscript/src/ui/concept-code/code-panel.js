@@ -1,5 +1,22 @@
 import { escapeHtml, renderPill, renderTag } from "../utils.js";
 
+function renderSemanticLabel(semantic) {
+  switch (semantic) {
+    case "setup":
+      return "Setup";
+    case "publish":
+      return "Message move";
+    case "runtime":
+      return "Waiting";
+    case "callback":
+      return "Response";
+    case "feedback":
+      return "Progress";
+    default:
+      return `${semantic.charAt(0).toUpperCase()}${semantic.slice(1)}`;
+  }
+}
+
 function renderSemanticLegend(viewModel) {
   const semantics = [];
 
@@ -14,7 +31,7 @@ function renderSemanticLegend(viewModel) {
       ${semantics.map((semantic) => `
         <span class="concept-legend-item">
           <span class="concept-legend-swatch semantic-${escapeHtml(semantic)}"></span>
-          ${escapeHtml(`${semantic.charAt(0).toUpperCase()}${semantic.slice(1)}`)}
+          ${escapeHtml(renderSemanticLabel(semantic))}
         </span>
       `).join("")}
     </div>
@@ -118,7 +135,7 @@ function renderAnnotatedCode(state, viewModel) {
       >
         <div class="concept-annotated-header">
           <strong>${escapeHtml(block.label)}</strong>
-          ${renderTag(block.semantic, block.semantic === "publish" ? "accent" : "default")}
+          ${renderTag(renderSemanticLabel(block.semantic), block.semantic === "publish" ? "accent" : "default")}
           <div class="concept-annotated-summary-shell">
             <span class="concept-annotated-summary">${escapeHtml(block.summary)}</span>
             <button
@@ -168,8 +185,8 @@ export function renderCodePanel(state, viewModel) {
 
       <p class="concept-panel-copy">
         ${escapeHtml(viewModel.guidedMode
-          ? "Guided mode narrows your focus to the block that maps to the current teaching step."
-          : "Each block of Python is labeled with its ROS role. The active block highlights when playback advances.")}
+          ? "Focus on the block tied to this lesson step."
+          : "Each Python block shows its ROS role, and the active block tracks the current step.")}
       </p>
 
       ${renderSemanticLegend(viewModel)}

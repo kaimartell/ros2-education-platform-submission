@@ -73,8 +73,8 @@ function renderTopicDetail(state, detail) {
   if (!state.topics.selectedTopicName) {
     return `
       <div class="empty-state">
-        <h3>Select a topic</h3>
-        <p>Choose a topic to inspect publishers, subscribers, live messages, and publishing controls.</p>
+        <h3>No topic selected.</h3>
+        <p>Select a topic to see details.</p>
       </div>
     `;
   }
@@ -83,7 +83,7 @@ function renderTopicDetail(state, detail) {
     return `
       <div class="empty-state">
         <h3>Loading topic details</h3>
-        <p>The browser is asking rosapi for the type, publishers, and subscribers for ${escapeHtml(state.topics.selectedTopicName)}.</p>
+        <p>Loading details for ${escapeHtml(state.topics.selectedTopicName)}.</p>
       </div>
     `;
   }
@@ -92,10 +92,16 @@ function renderTopicDetail(state, detail) {
   const mode = editor ? state.topics.composer.mode : "raw";
   const feedback = state.topics.publishResult;
   const feedbackClass = feedbackTone(feedback.status);
-  const echoActive = state.topicStream.subscriptionId && state.topicStream.topicName === detail.name;
+  const echoActive = Boolean(state.topicStream.subscriptionId && state.topicStream.topicName === detail.name);
+  const echoWaiting = echoActive && !state.topicStream.messages.length;
   const echoOutput = state.topicStream.messages.length
     ? state.topicStream.messages.join("\n\n")
-    : "(no topic echo active)";
+    : echoWaiting
+      ? `Waiting for messages on ${detail.name}.`
+      : "Start echo to watch incoming messages.";
+  const showPublishFeedback = feedback.status !== "idle";
+  const showRawEditor = !editor || mode === "raw";
+  const showTemplateButton = !editor || mode === "raw";
 
   return `
     <section class="detail-stack">
@@ -124,13 +130,21 @@ function renderTopicDetail(state, detail) {
 
       <section class="detail-section">
         <div class="section-head">
+          <div>
+            <p class="eyebrow">Step 1</p>
+            <h3>Inspect the topic path</h3>
+          </div>
+          ${renderPill("Connections", "accent")}
+        </div>
+
+        ${renderTopicFlowVisualizer(detail, state.topics.flow)}
+
+        <div class="section-head">
           <h3>Publishers</h3>
           ${renderTag(`${detail.publishers.length}`)}
         </div>
         ${renderRelationshipList(detail.publishers)}
-      </section>
 
-      <section class="detail-section">
         <div class="section-head">
           <h3>Subscribers</h3>
           ${renderTag(`${detail.subscribers.length}`)}
@@ -138,15 +152,16 @@ function renderTopicDetail(state, detail) {
         ${renderRelationshipList(detail.subscribers)}
       </section>
 
-      ${renderTopicFlowVisualizer(detail, state.topics.flow)}
-
       <section class="detail-section">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Echo</p>
-            <h3>Live messages</h3>
+            <p class="eyebrow">Step 2</p>
+            <h3>Watch live messages</h3>
           </div>
-          ${renderPill(echoActive ? "Echo running" : "Echo stopped", echoActive ? "success" : "default")}
+          ${renderPill(
+            echoActive ? (echoWaiting ? "Waiting for messages" : "Echo running") : "Echo stopped",
+            echoActive ? "success" : "default"
+          )}
         </div>
         <div class="action-row">
           <button type="button" data-action="start-topic-stream">Start echo</button>
@@ -158,10 +173,10 @@ function renderTopicDetail(state, detail) {
       <section class="detail-section">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Publish</p>
+            <p class="eyebrow">Step 3</p>
             <h3>Send a test message</h3>
           </div>
-          ${renderPill(editor ? "Simple mode available" : "Raw JSON only", editor ? "success" : "warning")}
+          ${renderPill(editor ? "Simple form ready" : "Raw JSON editor", editor ? "accent" : "default")}
         </div>
 
         ${editor ? `
@@ -172,7 +187,7 @@ function renderTopicDetail(state, detail) {
               data-action="set-publish-mode"
               data-mode="simple"
             >
-              Simple mode
+              Simple form
             </button>
             <button
               type="button"
@@ -183,43 +198,43 @@ function renderTopicDetail(state, detail) {
               Raw JSON
             </button>
           </div>
-        ` : `
-          <div class="callout callout-muted">
-            This message type does not have a beginner form yet, so the raw JSON editor is shown instead.
-          </div>
-        `}
+        ` : ""}
 
         ${editor && mode === "simple" ? `
           <div class="simple-editor">
             ${renderSimpleComposer(editor, state.topics.composer)}
           </div>
+          <p class="muted small">Need the full payload? Switch to Raw JSON.</p>
         ` : ""}
 
-        ${!editor || mode === "raw" ? `
-          <label class="field-label" for="topic-raw">Raw JSON payload</label>
+        ${showRawEditor ? `
+          <label class="field-label" for="topic-raw">${editor ? "Raw JSON payload" : "JSON payload"}</label>
           <textarea
             id="topic-raw"
             class="payload-box"
             spellcheck="false"
             data-bind="topic-raw"
           >${escapeHtml(state.topics.composer.rawText)}</textarea>
+          <p class="muted small">Use the template to start from a safe example.</p>
         ` : ""}
 
         <div class="action-row">
-          <button type="button" data-action="insert-topic-template">Use template</button>
+          ${showTemplateButton ? '<button type="button" data-action="insert-topic-template">Use template</button>' : ""}
           <button type="button" class="accent" data-action="publish-topic">Publish</button>
         </div>
 
-        <div class="callout callout-${feedbackClass}">
-          ${escapeHtml(feedback.status === "success"
-            ? "Publish succeeded."
-            : feedback.status === "error"
-              ? "Publish failed."
-              : feedback.status === "warning"
-                ? "Publish is not ready."
-                : "Publish controls ready.")}
-        </div>
-        <pre class="code-box">${escapeHtml(feedback.message)}</pre>
+        ${showPublishFeedback ? `
+          <div class="callout callout-${feedbackClass}">
+            ${escapeHtml(feedback.status === "success"
+              ? `Published to ${detail.name}.`
+              : feedback.status === "error"
+                ? "Publish failed."
+                : "Publish is not ready.")}
+          </div>
+          ${feedback.message
+            ? `<pre class="code-box">${escapeHtml(feedback.message)}</pre>`
+            : ""}
+        ` : ""}
       </section>
     </section>
   `;
@@ -229,25 +244,27 @@ export function renderTopicsPage(state, context) {
   const search = state.topics.searchText.trim().toLowerCase();
   const filteredTopics = state.graph.topics.filter((name) => name.toLowerCase().includes(search));
   const selectedTopicDetail = context.selectedTopicDetail;
+  const hasSearch = search.length > 0;
   const topicStatusLabel = !state.connection.connected
-    ? "Connect to load topic relationships"
+    ? "Connect to load topics and connections"
     : state.graph.hydration.topics === "loading"
-      ? "Loading topic relationships"
-      : "Topic relationships ready";
+      ? "Loading topics and connections"
+      : "Topics and connections ready";
   const topicStatusTone = !state.connection.connected || state.graph.hydration.topics === "loading"
     ? "warning"
     : "success";
+  const emptyTopicState = !state.connection.connected
+    ? `<div class="empty-state"><h3>No topics available.</h3><p>Connect to load topics.</p></div>`
+    : hasSearch
+      ? `<div class="empty-state"><h3>No topics match.</h3><p>Try a shorter search or refresh the graph.</p></div>`
+      : `<div class="empty-state"><h3>No topics available.</h3><p>Refresh the graph to look for topics.</p></div>`;
 
   return `
     <section class="page-stack">
       <article class="panel page-intro">
         <div class="page-intro-copy">
           <p class="eyebrow">Topics</p>
-          <h2>Inspect pub/sub behavior live.</h2>
-          <p class="lead">
-            Topics are message streams. Select one topic to see its type, which nodes publish to it, which nodes subscribe to it,
-            and optionally publish your own test message.
-          </p>
+          <h2>Inspect a topic's type, connections, and live messages.</h2>
         </div>
         <div class="page-intro-side">
           ${renderPill(topicStatusLabel, topicStatusTone)}
@@ -261,7 +278,7 @@ export function renderTopicsPage(state, context) {
               <p class="eyebrow">Topic browser</p>
               <h2>${state.graph.topics.length}</h2>
             </div>
-            ${renderTag("Live pub/sub")}
+            ${renderTag("Live topic activity")}
           </div>
 
           <label class="field-label" for="topic-search">Search topics</label>
@@ -278,8 +295,8 @@ export function renderTopicsPage(state, context) {
             <div class="topic-row topic-row-header">
               <span class="topic-cell topic-cell-name">Topic</span>
               <span class="topic-cell">Type</span>
-              <span class="topic-cell topic-cell-count">Pub</span>
-              <span class="topic-cell topic-cell-count">Sub</span>
+              <span class="topic-cell topic-cell-count">From</span>
+              <span class="topic-cell topic-cell-count">To</span>
             </div>
 
             ${filteredTopics.length
@@ -288,7 +305,7 @@ export function renderTopicsPage(state, context) {
                 context.getDetail("topic", name),
                 state.topics.selectedTopicName === name
               )).join("")
-              : `<div class="empty-state"><h3>No topics match</h3><p>Try a shorter search or refresh the graph.</p></div>`}
+              : emptyTopicState}
           </div>
         </section>
 
