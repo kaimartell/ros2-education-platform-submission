@@ -44,6 +44,12 @@ export function createSystemState() {
     searchText: "",
     showTopics: true,
     showServices: true,
+    arm: {
+      joints: { base: 0, shoulder: 0, elbow: 0 },
+      commandedDegrees: { base: null, shoulder: null, elbow: null },
+      subscriptionId: null,
+      lastUpdate: 0,
+    },
     selectedNodeName: "",
     selectedServiceName: "",
     serviceRequestText: "{}",

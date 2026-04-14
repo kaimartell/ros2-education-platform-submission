@@ -23,6 +23,7 @@ setup(
         "console_scripts": [
             "lesson_source_node = ros2_learning_demo.lesson_source_node:main",
             "lesson_reflector_node = ros2_learning_demo.lesson_reflector_node:main",
+            "arm_sim = ros2_learning_demo.arm_sim_node:main",
             "launch_api_server = ros2_learning_demo.launch_api_server:main",
             "validate_concept_code_api = ros2_learning_demo.validate_concept_code_api:main",
             "validate_launch_api = ros2_learning_demo.validate_launch_api:main",

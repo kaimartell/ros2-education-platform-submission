@@ -2920,7 +2920,7 @@ export const CONCEPT_CODE_TEMPLATES = [
       {
         id: "dock-feedback",
         sequence: 4,
-        label: "Feedback received",
+        label: "Feedback",
         eventType: "feedback",
         durationMs: 2400,
         codeBlockId: "feedback-callback",

@@ -12,10 +12,94 @@ const QUICK_TOPIC_TYPE_OPTIONS = [
   { value: CUSTOM_TOPIC_TYPE_OPTION, label: "Custom ROS type" },
 ];
 
+const TOPIC_PURPOSE_RULES = [
+  { exact: "/classroom/chat", description: "A custom text channel for quick tests." },
+  { exact: "/demo/chatter", description: "Demo text messages from the source node." },
+  { exact: "/demo/counter", description: "Demo count values that rise over time" },
+  { exact: "/demo/architecture_hint", description: "Plain-language summaries of the demo graph." },
+  { exact: "/rosout", description: "Log messages from ROS nodes." },
+  { exact: "/clock", description: "Time updates for simulation." },
+  { exact: "/parameter_events", description: "Parameter change updates." },
+  { exact: "/tf", description: "Moving frame transforms." },
+  { exact: "/tf_static", description: "Fixed frame transforms." },
+];
+
+const TOPIC_SUFFIX_PURPOSE_RULES = [
+  { suffix: "/cmd_vel", description: "Drive speed and turning commands." },
+  { suffix: "/scan", description: "Lidar distance sweep data." },
+  { suffix: "/odom", description: "Robot position and velocity estimates." },
+  { suffix: "/image_raw", description: "Camera image frames." },
+  { suffix: "/camera_info", description: "Camera calibration details." },
+  { suffix: "/joint_states", description: "Joint position and velocity updates." },
+  { suffix: "/imu", description: "Orientation and acceleration readings." },
+  { suffix: "/battery_state", description: "Battery charge and power updates." },
+  { suffix: "/front_range", description: "Front distance sensor readings." },
+  { suffix: "/rear_range", description: "Rear distance sensor readings." },
+];
+
+const TOPIC_NAME_PURPOSE_RULES = [
+  { fragments: ["chatter", "chat"], description: "Text messages shared between nodes" },
+  { fragments: ["counter", "count"], description: "Count values that change over time" },
+  { fragments: ["hint"], description: "Short explanations about the current graph" },
+  { fragments: ["image", "camera"], description: "Camera image frames" },
+  { fragments: ["scan", "lidar"], description: "Distance readings across a sweep" },
+  { fragments: ["range"], description: "Distance sensor readings" },
+  { fragments: ["pose", "goal"], description: "Target or estimated robot position" },
+  { fragments: ["odom"], description: "Robot position and speed estimates" },
+  { fragments: ["imu"], description: "Orientation and acceleration readings" },
+  { fragments: ["battery"], description: "Battery charge and power updates" },
+];
+
+const TYPE_PURPOSE_RULES = [
+  { types: ["std_msgs/String", "std_msgs/msg/String"], description: "Text messages." },
+  { types: ["std_msgs/Bool", "std_msgs/msg/Bool"], description: "True or false state messages." },
+  { types: ["std_msgs/Int32", "std_msgs/msg/Int32"], description: "Whole-number readings." },
+  { types: ["std_msgs/Float32", "std_msgs/msg/Float32", "std_msgs/Float64", "std_msgs/msg/Float64"], description: "Numeric readings." },
+  { types: ["geometry_msgs/msg/Twist"], description: "Drive speed and turning commands." },
+  { types: ["sensor_msgs/msg/Range"], description: "Distance sensor readings." },
+  { types: ["sensor_msgs/msg/LaserScan"], description: "Lidar distance sweep data." },
+  { types: ["sensor_msgs/msg/Image"], description: "Camera image frames." },
+  { types: ["sensor_msgs/msg/CameraInfo"], description: "Camera calibration details." },
+  { types: ["geometry_msgs/msg/Pose", "geometry_msgs/msg/PoseStamped"], description: "Target or estimated robot position." },
+  { types: ["nav_msgs/msg/Odometry"], description: "Robot position and velocity estimates." },
+  { types: ["rcl_interfaces/msg/Log"], description: "Log messages from ROS nodes." },
+];
+
+function topicPurposeFor(name, detail) {
+  const topicName = String(name || detail?.name || "").trim();
+  const topicType = String(detail?.type || "").trim();
+  const lowerName = topicName.toLowerCase();
+
+  const exactRule = TOPIC_PURPOSE_RULES.find((rule) => rule.exact === topicName);
+  if (exactRule) {
+    return exactRule.description;
+  }
+
+  const suffixRule = TOPIC_SUFFIX_PURPOSE_RULES.find((rule) => topicName.endsWith(rule.suffix));
+  if (suffixRule) {
+    return suffixRule.description;
+  }
+
+  const nameRule = TOPIC_NAME_PURPOSE_RULES.find((rule) =>
+    rule.fragments.some((fragment) => lowerName.includes(fragment))
+  );
+  if (nameRule) {
+    return nameRule.description;
+  }
+
+  const typeRule = TYPE_PURPOSE_RULES.find((rule) => rule.types.includes(topicType));
+  if (typeRule) {
+    return typeRule.description;
+  }
+
+  return "Messages shared between ROS nodes.";
+}
+
 function renderTopicRow(name, detail, isSelected) {
   const topicType = detail?.type || "Loading...";
   const publisherCount = detail ? detail.publishers.length : "--";
   const subscriberCount = detail ? detail.subscribers.length : "--";
+  const topicPurpose = topicPurposeFor(name, detail);
 
   return `
     <button
@@ -24,7 +108,10 @@ function renderTopicRow(name, detail, isSelected) {
       data-action="select-topic"
       data-name="${escapeHtml(name)}"
     >
-      <span class="topic-cell topic-cell-name">${escapeHtml(name)}</span>
+      <span class="topic-cell">
+        <span class="list-title">${escapeHtml(name)}</span><br>
+        <span class="list-meta">${escapeHtml(topicPurpose)}</span>
+      </span>
       <span class="topic-cell">${escapeHtml(topicType)}</span>
       <span class="topic-cell topic-cell-count">${escapeHtml(String(publisherCount))}</span>
       <span class="topic-cell topic-cell-count">${escapeHtml(String(subscriberCount))}</span>
@@ -216,6 +303,7 @@ function renderTopicDetail(state, detail) {
     `;
   }
 
+  const topicPurpose = topicPurposeFor(detail.name, detail);
   const editor = simpleTopicEditorFor(detail.type);
   const mode = editor ? state.topics.composer.mode : "raw";
   const feedback = state.topics.publishResult;
@@ -246,6 +334,10 @@ function renderTopicDetail(state, detail) {
 
       <div class="facts-grid">
         <article class="fact-card">
+          <span class="fact-label">Purpose</span>
+          <strong>${escapeHtml(topicPurpose)}</strong>
+        </article>
+        <article class="fact-card">
           <span class="fact-label">Message type</span>
           <strong>${escapeHtml(detail.type || "Unknown")}</strong>
         </article>
@@ -259,14 +351,14 @@ function renderTopicDetail(state, detail) {
         </article>
       </div>
 
-      <section class="detail-section">
+      <section class="detail-section callout">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Step 1</p>
-            <h3>Inspect the topic path</h3>
+            <h3>Connections</h3>
           </div>
-          ${renderPill("Connections", "accent")}
+          ${renderPill("Who uses this topic", "accent")}
         </div>
+        <p class="muted">See which nodes publish here and which ones listen.</p>
 
         ${renderTopicFlowVisualizer(detail, state.topics.flow)}
 
@@ -283,17 +375,17 @@ function renderTopicDetail(state, detail) {
         ${renderRelationshipList(detail.subscribers)}
       </section>
 
-      <section class="detail-section">
+      <section class="detail-section callout">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Step 2</p>
-            <h3>Watch live messages</h3>
+            <h3>Echo</h3>
           </div>
           ${renderPill(
             echoActive ? (echoWaiting ? "Waiting for messages" : "Echo running") : "Echo stopped",
             echoActive ? "success" : "default"
           )}
         </div>
+        <p class="muted">Watch messages as they arrive on this topic.</p>
         <div class="action-row">
           <button type="button" data-action="start-topic-stream">Start echo</button>
           <button type="button" data-action="stop-topic-stream" ${echoActive ? "" : "disabled"}>Stop</button>
@@ -301,14 +393,14 @@ function renderTopicDetail(state, detail) {
         <pre class="code-box">${escapeHtml(echoOutput)}</pre>
       </section>
 
-      <section class="detail-section">
+      <section class="detail-section callout">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Step 3</p>
-            <h3>Send a test message</h3>
+            <h3>Publish</h3>
           </div>
           ${renderPill(editor ? "Simple form ready" : "Raw JSON editor", editor ? "accent" : "default")}
         </div>
+        <p class="muted">Send a test message on this topic.</p>
 
         ${editor ? `
           <div class="mode-switch">

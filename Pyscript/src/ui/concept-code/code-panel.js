@@ -169,10 +169,10 @@ function renderAnnotatedCode(state, viewModel) {
 
 export function renderCodePanel(state, viewModel) {
   return `
-    <section class="panel concept-code-panel concept-stage-panel">
+    <section class="panel concept-code-panel concept-stage-panel" style="height: 100%;">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Code panel</p>
+          <p class="eyebrow">code</p>
           <h3>Annotated source</h3>
         </div>
         <div class="concept-panel-actions">

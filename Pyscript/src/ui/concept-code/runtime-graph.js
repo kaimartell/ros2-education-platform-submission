@@ -585,9 +585,11 @@ export function renderRuntimeGraphPanel(state, viewModel) {
     : viewModel.isContinuousMode
       ? `${(viewModel.simClockMs / 1000).toFixed(1)}s / ${(viewModel.simTotalDurationMs / 1000).toFixed(1)}s`
       : `Step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`;
-  const graphHeading = viewModel.isContinuousMode
-    ? "How live messages move through ROS"
-    : "How this step moves through ROS";
+  const graphHeading = viewModel.guidedMode
+    ? "What to follow in this lesson"
+    : viewModel.isContinuousMode
+      ? "How live messages move through ROS"
+      : "";
   const continuousStatus = viewModel.continuousRoverStatus;
   const simulationCopy = viewModel.template.simulation?.copy || {};
   const graphCopy = viewModel.guidedMode
@@ -598,7 +600,7 @@ export function renderRuntimeGraphPanel(state, viewModel) {
           ? ` Motor applying ${formatVelocityMps(continuousStatus.appliedMotorSpeedMps)} now${continuousStatus.queuedNextSpeedMps !== null ? `; queued next ${formatVelocityMps(continuousStatus.queuedNextSpeedMps)}.` : "."}`
           : ""}`
         : simulationCopy.graph || "Live message pulses show how data moves through ROS right now.")
-      : "The highlighted shapes show where the current step is happening in ROS.";
+      : "";
   const animationProgressMs = viewModel.isContinuousMode ? viewModel.simClockMs : viewModel.progressMs;
   const stepStartedSegments = !viewModel.isContinuousMode && !viewModel.guidedMode
     ? eventSegments.filter((segment) => animationProgressMs >= segment.startMs)
@@ -617,117 +619,121 @@ export function renderRuntimeGraphPanel(state, viewModel) {
     <section class="panel concept-runtime-panel concept-stage-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">ROS flow</p>
-          <h3>${escapeHtml(graphHeading)}</h3>
+          <p class="eyebrow">diagram</p>
+          ${graphHeading ? `<h3>${escapeHtml(graphHeading)}</h3>` : ""}
         </div>
         ${renderPill(graphPill, "accent")}
       </div>
 
-      <p class="concept-panel-copy">
-        ${escapeHtml(graphCopy)}
-      </p>
+      ${graphCopy ? `
+        <p class="concept-panel-copy">
+          ${escapeHtml(graphCopy)}
+        </p>
+      ` : ""}
 
-      ${viewModel.guidedMode ? "" : `
-        <aside
-          class="concept-playback-dock"
-          aria-label="Playback controls"
-          style="position: static; right: auto; bottom: auto; max-width: 100%; margin: 0.35rem 0 0.85rem;"
-        >
-          ${renderPlaybackControls(state, viewModel)}
-        </aside>
-      `}
+      <div class="concept-runtime-visual-stack" style="display: grid; gap: var(--space-md);">
+        ${viewModel.guidedMode ? "" : `
+          <aside
+            class="concept-playback-dock"
+            aria-label="Playback controls"
+            style="position: static; right: auto; bottom: auto; max-width: 100%; margin: ${graphCopy ? "0.35rem" : "0.15rem"} 0 0.85rem;"
+          >
+            ${renderPlaybackControls(state, viewModel)}
+          </aside>
+        `}
 
-      <div class="concept-graph-shell">
-        <svg class="concept-graph-svg" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}" aria-label="Concept and runtime graph">
-          ${edges.map((edge) => {
-            const geometry = getEdgeGeometry(edge, nodesById);
-            const isStepStarted = startedSegmentByEdgeId.has(edge.id);
-            const isFlowing = viewModel.isContinuousMode && activeEdgeIds.has(edge.id);
-            const isActive = viewModel.guidedMode
-              ? viewModel.activeGraphElementIds.includes(edge.id)
-              : viewModel.isContinuousMode
+        <div class="concept-graph-shell">
+          <svg class="concept-graph-svg" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}" aria-label="Concept and runtime graph">
+            ${edges.map((edge) => {
+              const geometry = getEdgeGeometry(edge, nodesById);
+              const isStepStarted = startedSegmentByEdgeId.has(edge.id);
+              const isFlowing = viewModel.isContinuousMode && activeEdgeIds.has(edge.id);
+              const isActive = viewModel.guidedMode
+                ? viewModel.activeGraphElementIds.includes(edge.id)
+                : viewModel.isContinuousMode
+                  ? false
+                : isStepStarted;
+              const isHighlighted = viewModel.guidedMode
+                ? viewModel.highlightedGraphElementIds.includes(edge.id)
+                : viewModel.isContinuousMode
+                  ? false
+                : viewModel.linkedGraphElementIds.includes(edge.id);
+              const isSelected = viewModel.selectedGraphElementId === edge.id;
+              const isHovered = viewModel.hoveredGraphElementId === edge.id;
+              const isDimmed = !viewModel.isContinuousMode
+                && viewModel.shouldDimGraph
+                && !isActive
+                && !isSelected
+                && !isHovered
+                && !isHighlighted;
+              const isGuidedTarget = viewModel.guidedMode && viewModel.guidedTargetGraphElementIds.includes(edge.id);
+              const isGuidedSolved = isGuidedTarget && viewModel.guidedShowExplanation;
+              const topicPipeClass = isTopicPipe(edge, nodesById) ? "topic-dashed" : "";
+              const activePulseSegment = activeSegmentByEdgeId.get(edge.id) || null;
+              const activeFlowSegments = viewModel.isContinuousMode
+                ? activeSegmentsByEdgeId.get(edge.id) || []
+                : [];
+              const badgeState = activePulseSegment?.label
+                ? lastValueByEdgeId.get(edge.id) || { label: activePulseSegment.label }
+                : lastValueByEdgeId.get(edge.id) || null;
+
+              return `
+                <g
+                  class="concept-edge-group ${isActive ? "active" : ""} ${isFlowing ? "flowing" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isDimmed ? "dimmed" : ""} ${isGuidedTarget ? "guided-target" : ""} ${isGuidedSolved ? "guided-solved" : ""}"
+                  data-action="select-concept-graph-element"
+                  data-element-id="${escapeHtml(edge.id)}"
+                  data-concept-hover-type="graph-element"
+                  data-concept-hover-id="${escapeHtml(edge.id)}"
+                >
+                  ${renderGraphTooltip(edgeTooltipsById.get(edge.id) || "")}
+                  <path class="concept-edge-outer ${topicPipeClass} ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""}" d="${geometry?.d || ""}"></path>
+                  <path class="concept-edge-inner ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""}" d="${geometry?.d || ""}"></path>
+                  ${activeFlowSegments.map((segment) => renderContinuousFlowPulse(segment, geometry, animationProgressMs)).join("")}
+                  ${renderValueBadge(badgeState, edge, geometry)}
+                  ${geometry && edge.label ? renderEdgeLabel(edge, geometry) : ""}
+                </g>
+              `;
+            }).join("")}
+
+            ${nodes.map((node) => {
+              const geometry = getNodeGeometry(node);
+              const isHighlighted = viewModel.isContinuousMode
                 ? false
-              : isStepStarted;
-            const isHighlighted = viewModel.guidedMode
-              ? viewModel.highlightedGraphElementIds.includes(edge.id)
-              : viewModel.isContinuousMode
+                : viewModel.highlightedGraphElementIds.includes(node.id);
+              const isActive = viewModel.isContinuousMode
                 ? false
-              : viewModel.linkedGraphElementIds.includes(edge.id);
-            const isSelected = viewModel.selectedGraphElementId === edge.id;
-            const isHovered = viewModel.hoveredGraphElementId === edge.id;
-            const isDimmed = !viewModel.isContinuousMode
-              && viewModel.shouldDimGraph
-              && !isActive
-              && !isSelected
-              && !isHovered
-              && !isHighlighted;
-            const isGuidedTarget = viewModel.guidedMode && viewModel.guidedTargetGraphElementIds.includes(edge.id);
-            const isGuidedSolved = isGuidedTarget && viewModel.guidedShowExplanation;
-            const topicPipeClass = isTopicPipe(edge, nodesById) ? "topic-dashed" : "";
-            const activePulseSegment = activeSegmentByEdgeId.get(edge.id) || null;
-            const activeFlowSegments = viewModel.isContinuousMode
-              ? activeSegmentsByEdgeId.get(edge.id) || []
-              : [];
-            const badgeState = activePulseSegment?.label
-              ? lastValueByEdgeId.get(edge.id) || { label: activePulseSegment.label }
-              : lastValueByEdgeId.get(edge.id) || null;
+                : viewModel.activeGraphElementIds.includes(node.id);
+              const isSelected = viewModel.selectedGraphElementId === node.id;
+              const isHovered = viewModel.hoveredGraphElementId === node.id;
+              const isDimmed = !viewModel.isContinuousMode
+                && viewModel.shouldDimGraph
+                && !isActive
+                && !isSelected
+                && !isHovered
+                && !isHighlighted;
+              const isGuidedTarget = viewModel.guidedMode && viewModel.guidedTargetGraphElementIds.includes(node.id);
+              const isGuidedSolved = isGuidedTarget && viewModel.guidedShowExplanation;
 
-            return `
-              <g
-                class="concept-edge-group ${isActive ? "active" : ""} ${isFlowing ? "flowing" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isDimmed ? "dimmed" : ""} ${isGuidedTarget ? "guided-target" : ""} ${isGuidedSolved ? "guided-solved" : ""}"
-                data-action="select-concept-graph-element"
-                data-element-id="${escapeHtml(edge.id)}"
-                data-concept-hover-type="graph-element"
-                data-concept-hover-id="${escapeHtml(edge.id)}"
-              >
-                ${renderGraphTooltip(edgeTooltipsById.get(edge.id) || "")}
-                <path class="concept-edge-outer ${topicPipeClass} ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""}" d="${geometry?.d || ""}"></path>
-                <path class="concept-edge-inner ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""}" d="${geometry?.d || ""}"></path>
-                ${activeFlowSegments.map((segment) => renderContinuousFlowPulse(segment, geometry, animationProgressMs)).join("")}
-                ${renderValueBadge(badgeState, edge, geometry)}
-                ${geometry && edge.label ? renderEdgeLabel(edge, geometry) : ""}
-              </g>
-            `;
-          }).join("")}
+              return `
+                <g
+                  class="concept-graph-node kind-${escapeHtml(node.kind)} ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isDimmed ? "dimmed" : ""} ${isGuidedTarget ? "guided-target" : ""} ${isGuidedSolved ? "guided-solved" : ""}"
+                  data-action="select-concept-graph-element"
+                  data-element-id="${escapeHtml(node.id)}"
+                  data-concept-hover-type="graph-element"
+                  data-concept-hover-id="${escapeHtml(node.id)}"
+                >
+                  ${renderGraphTooltip(nodeTooltipsById.get(node.id) || "")}
+                  <rect x="${geometry.left}" y="${geometry.top}" width="${geometry.width}" height="${geometry.height}" rx="22" ry="22"></rect>
+                  <text class="concept-node-label" x="${geometry.x}" y="${geometry.y - 6}" text-anchor="middle">${escapeHtml(node.label)}</text>
+                  <text class="concept-node-meta" x="${geometry.x}" y="${geometry.y + 16}" text-anchor="middle">${escapeHtml(node.meta || node.kind)}</text>
+                </g>
+              `;
+            }).join("")}
+          </svg>
+        </div>
 
-          ${nodes.map((node) => {
-            const geometry = getNodeGeometry(node);
-            const isHighlighted = viewModel.isContinuousMode
-              ? false
-              : viewModel.highlightedGraphElementIds.includes(node.id);
-            const isActive = viewModel.isContinuousMode
-              ? false
-              : viewModel.activeGraphElementIds.includes(node.id);
-            const isSelected = viewModel.selectedGraphElementId === node.id;
-            const isHovered = viewModel.hoveredGraphElementId === node.id;
-            const isDimmed = !viewModel.isContinuousMode
-              && viewModel.shouldDimGraph
-              && !isActive
-              && !isSelected
-              && !isHovered
-              && !isHighlighted;
-            const isGuidedTarget = viewModel.guidedMode && viewModel.guidedTargetGraphElementIds.includes(node.id);
-            const isGuidedSolved = isGuidedTarget && viewModel.guidedShowExplanation;
-
-            return `
-              <g
-                class="concept-graph-node kind-${escapeHtml(node.kind)} ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isDimmed ? "dimmed" : ""} ${isGuidedTarget ? "guided-target" : ""} ${isGuidedSolved ? "guided-solved" : ""}"
-                data-action="select-concept-graph-element"
-                data-element-id="${escapeHtml(node.id)}"
-                data-concept-hover-type="graph-element"
-                data-concept-hover-id="${escapeHtml(node.id)}"
-              >
-                ${renderGraphTooltip(nodeTooltipsById.get(node.id) || "")}
-                <rect x="${geometry.left}" y="${geometry.top}" width="${geometry.width}" height="${geometry.height}" rx="22" ry="22"></rect>
-                <text class="concept-node-label" x="${geometry.x}" y="${geometry.y - 6}" text-anchor="middle">${escapeHtml(node.label)}</text>
-                <text class="concept-node-meta" x="${geometry.x}" y="${geometry.y + 16}" text-anchor="middle">${escapeHtml(node.meta || node.kind)}</text>
-              </g>
-            `;
-          }).join("")}
-        </svg>
+        ${renderHardwareVisual(viewModel)}
       </div>
-
-      ${renderHardwareVisual(viewModel)}
     </section>
   `;
 }

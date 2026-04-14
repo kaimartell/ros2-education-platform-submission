@@ -1,4 +1,14 @@
+import { renderArmVisual } from "../system/arm-visual.js";
 import { escapeHtml, feedbackTone, formatCount, renderInlineList, renderPill, renderTag } from "../utils.js";
+
+const ARM_FEATURE_ENABLED = false;
+const ARM_NODE_NAME = "arm_sim_node";
+const ARM_SERVICE_NAMES = new Set([
+  "/arm/set_base",
+  "/arm/set_shoulder",
+  "/arm/set_elbow",
+  "/arm/home",
+]);
 
 const NODE_METADATA = {
   lesson_source_node: {
@@ -17,6 +27,12 @@ const NODE_METADATA = {
     displayName: "rosapi Node",
     description: "Answers graph-inspection questions from the learning UI.",
   },
+  ...(ARM_FEATURE_ENABLED ? {
+    arm_sim_node: {
+      displayName: "Arm Simulator",
+      description: "Simulates a 3-DOF robotic arm. Publishes joint angles and accepts motion commands.",
+    },
+  } : {}),
 };
 
 const SERVICE_METADATA = {
@@ -32,6 +48,20 @@ const SERVICE_METADATA = {
   "/demo/list_learning_resources": {
     description: "Returns a short catalog of learning resources for the classroom UI.",
   },
+  ...(ARM_FEATURE_ENABLED ? {
+    "/arm/set_base": {
+      description: "Set the base yaw angle in degrees. Uses request field 'a'.",
+    },
+    "/arm/set_shoulder": {
+      description: "Set the shoulder pitch angle in degrees. Uses request field 'a'.",
+    },
+    "/arm/set_elbow": {
+      description: "Set the elbow pitch angle in degrees. Uses request field 'a'.",
+    },
+    "/arm/home": {
+      description: "Reset all joints to zero (home position).",
+    },
+  } : {}),
 };
 
 const SERVICE_TYPE_GUIDANCE = {
@@ -61,6 +91,14 @@ function normalizeNodeName(name) {
 
 function getNodeMetadata(name) {
   return NODE_METADATA[normalizeNodeName(name)] || null;
+}
+
+function isArmNode(name) {
+  return normalizeNodeName(name) === ARM_NODE_NAME;
+}
+
+function isVisibleNode(name) {
+  return ARM_FEATURE_ENABLED || !isArmNode(name);
 }
 
 function getNodeDisplayName(name) {
@@ -94,8 +132,12 @@ function getServiceDescription(serviceName) {
   return SERVICE_METADATA[serviceName]?.description || "";
 }
 
+function isVisibleService(serviceName) {
+  return ARM_FEATURE_ENABLED || !ARM_SERVICE_NAMES.has(serviceName);
+}
+
 function hasServiceDescription(serviceName) {
-  return !!getServiceDescription(serviceName);
+  return isVisibleService(serviceName) && !!getServiceDescription(serviceName);
 }
 
 function getVisibleServices(items) {
@@ -374,8 +416,10 @@ function renderServiceTester(state, selectedNodeDetail, selectedServiceDetail) {
 
 export function renderSystemPage(state, context) {
   const search = state.system.searchText.trim().toLowerCase();
-  const filteredNodes = state.graph.nodes.filter((name) => matchesNodeSearch(name, search));
-  const selectedNodeDetail = context.selectedNodeDetail;
+  const visibleNodes = state.graph.nodes.filter(isVisibleNode);
+  const filteredNodes = visibleNodes.filter((name) => matchesNodeSearch(name, search));
+  const selectedNodeName = isVisibleNode(state.system.selectedNodeName) ? state.system.selectedNodeName : "";
+  const selectedNodeDetail = selectedNodeName ? context.selectedNodeDetail : null;
   const selectedServiceDetail = context.selectedServiceDetail;
   const nodeStatusLabel = !state.connection.connected
     ? "Connect to load node relationships"
@@ -410,7 +454,7 @@ export function renderSystemPage(state, context) {
           <div class="section-head">
             <div>
               <p class="eyebrow">Nodes</p>
-              <h2>${state.graph.nodes.length}</h2>
+              <h2>${visibleNodes.length}</h2>
             </div>
           </div>
 
@@ -437,7 +481,7 @@ export function renderSystemPage(state, context) {
 
         <section class="panel detail-panel">
           ${renderNodeDetail(
-            state.system.selectedNodeName,
+            selectedNodeName,
             selectedNodeDetail,
             state.system.showServices,
             state.system.selectedServiceName
@@ -445,6 +489,19 @@ export function renderSystemPage(state, context) {
           ${renderServiceTester(state, selectedNodeDetail, selectedServiceDetail)}
         </section>
       </div>
+
+      ${ARM_FEATURE_ENABLED ? `
+        <article class="panel arm-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Interactive Demo</p>
+              <h2>Robotic Arm Simulator</h2>
+              <p class="muted small">All connected users see the same arm. Use sliders or service calls to move it.</p>
+            </div>
+          </div>
+          ${renderArmVisual(state.system.arm, state.connection.connected)}
+        </article>
+      ` : ""}
     </section>
   `;
 }

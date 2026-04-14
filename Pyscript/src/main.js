@@ -35,6 +35,7 @@ import {
 import { getGuidedLesson } from "./ui/concept-code/guided-lessons.js";
 import { patchHtml } from "./ui/dom-patch.js";
 import { renderApp } from "./ui/render.js";
+import { destroyArmScene, updateArmScene } from "./ui/system/arm-scene.js";
 import {
   createConceptCodeEventList,
   getConceptCodeTemplate,
@@ -46,6 +47,7 @@ import {
   FLOW_PLACEHOLDER_SOURCE,
 } from "./ui/topics/flow-visualizer.js";
 
+const ARM_FEATURE_ENABLED = false;
 const state = createInitialState();
 const client = new RosbridgeClient();
 const introspection = new RosIntrospection(client);
@@ -65,6 +67,7 @@ let conceptCodeActiveBlockScrollTimeoutId = null;
 let conceptCodeSimFrameId = null;
 let conceptCodeSimLastFrameTime = 0;
 let conceptCodeSimFireCounters = new Map();
+let armJointCommandDebounceIds = new Map();
 let renderQueued = false;
 const ROVER_SIM_TEMPLATE_ID = "distance-aware-rover";
 const ROVER_SIM_CORRIDOR_WIDTH_METERS = 2.0;
@@ -435,6 +438,12 @@ function flushRender() {
 
   if (shouldQueueActiveBlockScroll) {
     queueConceptCodeActiveBlockScroll();
+  }
+
+  if (ARM_FEATURE_ENABLED && state.page === "system") {
+    updateArmScene(state.system.arm.joints);
+  } else {
+    destroyArmScene();
   }
 }
 
@@ -1483,6 +1492,15 @@ function resetGraphDependentState() {
   if (state.logs.subscriptionId) {
     client.unsubscribe(state.logs.subscriptionId);
   }
+  if (state.system.arm.subscriptionId) {
+    client.unsubscribe(state.system.arm.subscriptionId);
+  }
+  if (armJointCommandDebounceIds.size) {
+    for (const timeoutId of armJointCommandDebounceIds.values()) {
+      window.clearTimeout(timeoutId);
+    }
+    armJointCommandDebounceIds = new Map();
+  }
 
   resetTopicFlowState();
   stopConceptCodePlaybackLoop();
@@ -1952,6 +1970,114 @@ function startLogs() {
   } catch (error) {
     setError(`Unable to watch /rosout: ${error.message}`);
   }
+}
+
+function pushArmJointState(messageObject) {
+  try {
+    const data = JSON.parse(messageObject?.data || "{}");
+    if (!Array.isArray(data?.joints)) {
+      return;
+    }
+
+    let renderNeeded = false;
+    let sawJoint = false;
+    for (const joint of data.joints) {
+      const jointName = String(joint?.name || "");
+      const nextAngle = Number(joint?.angle);
+      if (!(jointName in state.system.arm.joints) || !Number.isFinite(nextAngle)) {
+        continue;
+      }
+
+      sawJoint = true;
+      if (state.system.arm.joints[jointName] !== nextAngle) {
+        state.system.arm.joints[jointName] = nextAngle;
+        renderNeeded = true;
+      }
+
+      const commandedDegrees = state.system.arm.commandedDegrees[jointName];
+      const actualDegrees = nextAngle * (180 / Math.PI);
+      if (Number.isFinite(commandedDegrees) && Math.abs(actualDegrees - commandedDegrees) <= 1) {
+        state.system.arm.commandedDegrees[jointName] = null;
+        renderNeeded = true;
+      }
+    }
+
+    if (!sawJoint) {
+      return;
+    }
+
+    state.system.arm.lastUpdate = Date.now();
+    if (renderNeeded) {
+      render();
+    }
+  } catch (_error) {
+    // Ignore malformed arm state messages so the System page remains stable.
+  }
+}
+
+function stopArmSubscription() {
+  if (state.system.arm.subscriptionId) {
+    client.unsubscribe(state.system.arm.subscriptionId);
+    state.system.arm.subscriptionId = null;
+  }
+}
+
+function startArmSubscription() {
+  if (!ARM_FEATURE_ENABLED || !state.connection.connected || state.system.arm.subscriptionId) {
+    return;
+  }
+
+  try {
+    state.system.arm.subscriptionId = client.subscribe(
+      "/arm/joint_states",
+      "std_msgs/msg/String",
+      pushArmJointState
+    );
+  } catch (_error) {
+    state.system.arm.subscriptionId = null;
+  }
+}
+
+function queueArmJointCommand(jointName, degrees) {
+  if (!ARM_FEATURE_ENABLED) {
+    return;
+  }
+
+  const serviceMap = {
+    base: "/arm/set_base",
+    shoulder: "/arm/set_shoulder",
+    elbow: "/arm/set_elbow",
+  };
+  const serviceName = serviceMap[jointName];
+  if (!serviceName || !state.connection.connected) {
+    return;
+  }
+
+  state.system.arm.commandedDegrees[jointName] = degrees;
+
+  const existingTimeoutId = armJointCommandDebounceIds.get(jointName);
+  if (existingTimeoutId) {
+    window.clearTimeout(existingTimeoutId);
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    armJointCommandDebounceIds.delete(jointName);
+    client.callService(serviceName, "example_interfaces/srv/AddTwoInts", {
+      a: degrees,
+      b: 0,
+    }).then((response) => {
+      const clampedDegrees = Number(response?.sum);
+      if (Number.isFinite(clampedDegrees)) {
+        state.system.arm.commandedDegrees[jointName] = clampedDegrees;
+        render();
+      }
+    }).catch(() => {
+      state.system.arm.commandedDegrees[jointName] = null;
+      render();
+    });
+  }, 100);
+
+  armJointCommandDebounceIds.set(jointName, timeoutId);
 }
 
 function readJson(textValue, label) {
@@ -2497,6 +2623,28 @@ async function handleAction(action, element) {
     case "launch-stop":
       await stopLaunch();
       return;
+    case "arm-home":
+      if (ARM_FEATURE_ENABLED && state.connection.connected) {
+        for (const timeoutId of armJointCommandDebounceIds.values()) {
+          window.clearTimeout(timeoutId);
+        }
+        armJointCommandDebounceIds = new Map();
+        state.system.arm.commandedDegrees = {
+          base: 0,
+          shoulder: 0,
+          elbow: 0,
+        };
+        render();
+        client.callService("/arm/home", "std_srvs/srv/Trigger", {}).catch(() => {
+          state.system.arm.commandedDegrees = {
+            base: null,
+            shoulder: null,
+            elbow: null,
+          };
+          render();
+        });
+      }
+      return;
     default:
       return;
   }
@@ -2555,6 +2703,19 @@ function bindEvents() {
 
   root.addEventListener("input", (event) => {
     const target = getEventTargetElement(event.target);
+    const action = target?.dataset.action;
+    if (action === "arm-set-joint") {
+      if (!ARM_FEATURE_ENABLED) {
+        return;
+      }
+      const jointName = target.dataset.joint || "";
+      const degrees = Number.parseInt(target.value || "0", 10);
+      if (!Number.isNaN(degrees)) {
+        queueArmJointCommand(jointName, degrees);
+      }
+      return;
+    }
+
     const binding = target?.dataset.bind;
     if (!binding) {
       return;
@@ -2688,6 +2849,11 @@ function initializeConnectionListeners() {
     state.connection = { ...nextState, url: nextState.url || state.connection.url };
 
     if (nextState.connected) {
+      if (ARM_FEATURE_ENABLED) {
+        startArmSubscription();
+      } else {
+        stopArmSubscription();
+      }
       clearError();
       render();
       void refreshGraph();
@@ -2695,6 +2861,7 @@ function initializeConnectionListeners() {
     }
 
     if (wasConnected && !nextState.connected) {
+      stopArmSubscription();
       clearError();
       resetGraphDependentState();
       render();

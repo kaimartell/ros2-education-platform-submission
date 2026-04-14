@@ -41,4 +41,11 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{"note_prefix": LaunchConfiguration("note_prefix")}],
     )
 
-    return LaunchDescription(launch_args + [source_node, reflector_node])
+    arm_sim_node = Node(
+        package="ros2_learning_demo",
+        executable="arm_sim",
+        name="arm_sim_node",
+        output="screen",
+    )
+
+    return LaunchDescription(launch_args + [source_node, reflector_node, arm_sim_node])
