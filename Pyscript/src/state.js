@@ -1,7 +1,11 @@
-export const APP_PAGES = ["learn", "system", "topics", "code-flow", "launch"];
+import { seedTopicComposer } from "./core/message-templates.js";
+
+export const APP_PAGES = ["learn", "system", "topics", "code-flow"];
 export const DEFAULT_PAGE = "learn";
 export const TOPIC_HISTORY_LIMIT = 20;
 export const LOG_HISTORY_LIMIT = 30;
+export const DEFAULT_DRAFT_TOPIC_TYPE = "std_msgs/msg/String";
+export const CUSTOM_TOPIC_TYPE_OPTION = "__custom__";
 
 export function createFeedbackState(message = "", status = "idle") {
   return {
@@ -65,11 +69,23 @@ export function createTopicFlowState() {
   };
 }
 
+export function createTopicDraftState() {
+  return {
+    name: "/classroom/chat",
+    type: DEFAULT_DRAFT_TOPIC_TYPE,
+    customType: "",
+    composer: seedTopicComposer(DEFAULT_DRAFT_TOPIC_TYPE),
+    result: createFeedbackState("", "idle"),
+  };
+}
+
 export function createTopicsState() {
   return {
     searchText: "",
     selectedTopicName: "",
+    creatingTopic: false,
     composer: createTopicComposerState(),
+    draft: createTopicDraftState(),
     publishResult: createFeedbackState("Select a topic to inspect or publish."),
     flow: createTopicFlowState(),
   };
@@ -144,7 +160,14 @@ export function createConceptCodeState() {
       status: "paused",
       activeEventIndex: 0,
       progressMs: 0,
-      speed: 0.7,
+      speed: 0.5,
+      mode: "step",
+      simClockMs: 0,
+      activeTokens: [],
+      simLog: [],
+      activeCodeBlockIds: [],
+      activeSimGraphElementIds: [],
+      roverSim: null,
     },
     interaction: {
       hoveredCodeBlockId: "",

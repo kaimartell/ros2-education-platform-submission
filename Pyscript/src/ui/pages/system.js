@@ -1,9 +1,122 @@
 import { escapeHtml, feedbackTone, formatCount, renderInlineList, renderPill, renderTag } from "../utils.js";
 
+const NODE_METADATA = {
+  lesson_source_node: {
+    displayName: "Lesson Source Node",
+    description: "Publishes the demo topics so you can trace where messages start.",
+  },
+  lesson_reflector_node: {
+    displayName: "Lesson Reflector Node",
+    description: "Listens to the source node, then republishes a plain-language architecture hint.",
+  },
+  rosbridge_websocket: {
+    displayName: "rosbridge WebSocket",
+    description: "Connects the browser to the ROS graph.",
+  },
+  rosapi_node: {
+    displayName: "rosapi Node",
+    description: "Answers graph-inspection questions from the learning UI.",
+  },
+};
+
+const SERVICE_METADATA = {
+  "/demo/reset_counter": {
+    description: "Resets the demo counter back to zero.",
+  },
+  "/demo/set_streaming": {
+    description: "Starts or pauses the source node publishing loop.",
+  },
+  "/demo/add_two_ints": {
+    description: "Adds two whole numbers and returns the sum.",
+  },
+  "/demo/list_learning_resources": {
+    description: "Returns a short catalog of learning resources for the classroom UI.",
+  },
+};
+
+const SERVICE_TYPE_GUIDANCE = {
+  "std_srvs/Trigger": {
+    usage: "This service takes no request fields. Leave the request as {} and click Call service.",
+  },
+  "std_srvs/srv/Trigger": {
+    usage: "This service takes no request fields. Leave the request as {} and click Call service.",
+  },
+  "std_srvs/SetBool": {
+    usage: "Set `data` to `true` to turn something on or `false` to turn it off.",
+  },
+  "std_srvs/srv/SetBool": {
+    usage: "Set `data` to `true` to turn something on or `false` to turn it off.",
+  },
+  "example_interfaces/AddTwoInts": {
+    usage: "Fill in `a` and `b` with two integers, then call the service to see the returned sum.",
+  },
+  "example_interfaces/srv/AddTwoInts": {
+    usage: "Fill in `a` and `b` with two integers, then call the service to see the returned sum.",
+  },
+};
+
+function normalizeNodeName(name) {
+  return String(name || "").replace(/^\//, "");
+}
+
+function getNodeMetadata(name) {
+  return NODE_METADATA[normalizeNodeName(name)] || null;
+}
+
+function getNodeDisplayName(name) {
+  return getNodeMetadata(name)?.displayName || name;
+}
+
+function getNodeDescription(name) {
+  return getNodeMetadata(name)?.description || "";
+}
+
+function matchesNodeSearch(name, search) {
+  if (!search) {
+    return true;
+  }
+
+  const normalizedSearch = search.toLowerCase();
+  const nodeMetadata = getNodeMetadata(name);
+
+  return [
+    name,
+    nodeMetadata?.displayName,
+    nodeMetadata?.description,
+  ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch));
+}
+
+function renderRosName(name) {
+  return `<span class="list-meta">ROS name: ${escapeHtml(name)}</span>`;
+}
+
+function getServiceDescription(serviceName) {
+  return SERVICE_METADATA[serviceName]?.description || "";
+}
+
+function hasServiceDescription(serviceName) {
+  return !!getServiceDescription(serviceName);
+}
+
+function getVisibleServices(items) {
+  return (Array.isArray(items) ? items : []).filter(hasServiceDescription);
+}
+
+function getServiceUsage(typeName) {
+  return SERVICE_TYPE_GUIDANCE[typeName]?.usage || "Use template to fill a request, then call the service.";
+}
+
 function renderNodeCard(name, detail, isSelected) {
+  const displayName = getNodeDisplayName(name);
+  const hasFriendlyLabel = displayName !== name;
+  const visibleServices = detail ? getVisibleServices(detail.services) : [];
   const summary = detail
-    ? `Publishes ${detail.publishing.length} | Subscribes ${detail.subscribing.length} | Services ${detail.services.length}`
-    : "Select to load relationships";
+    ? [
+      `Publishes to ${formatCount(detail.publishing.length, "topic")}.`,
+      `Subscribes to ${formatCount(detail.subscribing.length, "topic")}.`,
+      `Offers ${formatCount(visibleServices.length, "guided service")}.`,
+    ]
+    : ["Click to inspect topics and services."];
 
   return `
     <button
@@ -12,8 +125,9 @@ function renderNodeCard(name, detail, isSelected) {
       data-action="select-node"
       data-name="${escapeHtml(name)}"
     >
-      <span class="list-title">${escapeHtml(name)}</span>
-      <span class="list-meta">${escapeHtml(summary)}</span>
+      <span class="list-title">${escapeHtml(displayName)}</span>
+      ${hasFriendlyLabel ? renderRosName(name) : ""}
+      ${summary.map((line) => `<span class="list-meta">${escapeHtml(line)}</span>`).join("")}
     </button>
   `;
 }
@@ -52,7 +166,51 @@ function renderServiceList(items, selectedServiceName) {
   );
 }
 
+function renderServiceSection(detail, showServices, selectedServiceName) {
+  const visibleServices = getVisibleServices(detail.services);
+  const countTag = renderTag(formatCount(visibleServices.length, "guided service"));
+
+  if (!visibleServices.length) {
+    return `
+      <section class="detail-section">
+        <div class="section-head">
+          <h3>Guided Services</h3>
+          ${countTag}
+        </div>
+        <p class="muted small">${detail.services.length
+          ? "This node has services, but none have a student-facing description yet."
+          : "This node does not offer any services."}</p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="detail-section">
+      <div class="section-head">
+        <div>
+          <h3>Guided Services</h3>
+          <p class="muted small">${showServices
+            ? "Select a service here, then use the tools below to try a request."
+            : "Turn on service tools to inspect request and response examples."}</p>
+        </div>
+        <div class="toggle-row">
+          ${countTag}
+          <label class="toggle">
+            <input type="checkbox" data-bind="system-show-services" ${showServices ? "checked" : ""}>
+            <span>Show service tools</span>
+          </label>
+        </div>
+      </div>
+      ${showServices
+        ? renderServiceList(visibleServices, selectedServiceName)
+        : `<p class="muted small">Show service tools to inspect the service type, fill in a request, and try a call.</p>`}
+    </section>
+  `;
+}
+
 function renderNodeDetail(selectedNodeName, detail, showServices, selectedServiceName) {
+  const selectedNodeLabel = getNodeDisplayName(selectedNodeName);
+
   if (!selectedNodeName) {
     return `
       <div class="empty-state">
@@ -66,17 +224,24 @@ function renderNodeDetail(selectedNodeName, detail, showServices, selectedServic
     return `
       <div class="empty-state">
         <h3>Loading node details</h3>
-        <p>Checking what ${escapeHtml(selectedNodeName)} publishes, subscribes to, and offers as services.</p>
+        <p>Checking what ${escapeHtml(selectedNodeLabel)} publishes, subscribes to, and offers as services.</p>
       </div>
     `;
   }
+
+  const displayName = getNodeDisplayName(detail.name);
+  const hasFriendlyLabel = displayName !== detail.name;
+  const description = getNodeDescription(detail.name);
+  const visibleServices = getVisibleServices(detail.services);
 
   return `
     <section class="detail-stack">
       <div class="section-head">
         <div>
           <p class="eyebrow">Selected Node</p>
-          <h2>${escapeHtml(detail.name)}</h2>
+          <h2>${escapeHtml(displayName)}</h2>
+          ${hasFriendlyLabel ? `<p class="muted small">ROS name: ${escapeHtml(detail.name)}</p>` : ""}
+          ${description ? `<p class="muted small">${escapeHtml(description)}</p>` : ""}
         </div>
       </div>
 
@@ -90,10 +255,12 @@ function renderNodeDetail(selectedNodeName, detail, showServices, selectedServic
           <strong>${escapeHtml(formatCount(detail.subscribing.length, "topic"))}</strong>
         </article>
         <article class="fact-card">
-          <span class="fact-label">Offers</span>
-          <strong>${escapeHtml(formatCount(detail.services.length, "service"))}</strong>
+          <span class="fact-label">Guided services</span>
+          <strong>${escapeHtml(formatCount(visibleServices.length, "service"))}</strong>
         </article>
       </div>
+
+      <p class="muted small">Click a topic chip to jump to the Topics page and inspect live messages.</p>
 
       <section class="detail-section">
         <div class="section-head">
@@ -111,15 +278,7 @@ function renderNodeDetail(selectedNodeName, detail, showServices, selectedServic
         ${renderTopicJumpList(detail.subscribing)}
       </section>
 
-      ${showServices ? `
-        <section class="detail-section">
-          <div class="section-head">
-            <h3>Services</h3>
-            ${renderTag(formatCount(detail.services.length, "service"))}
-          </div>
-          ${renderServiceList(detail.services, selectedServiceName)}
-        </section>
-      ` : ""}
+      ${renderServiceSection(detail, showServices, selectedServiceName)}
     </section>
   `;
 }
@@ -129,12 +288,18 @@ function renderServiceTester(state, selectedNodeDetail, selectedServiceDetail) {
     return "";
   }
 
-  const availableServices = selectedNodeDetail.services;
+  const availableServices = getVisibleServices(selectedNodeDetail.services);
+  if (!availableServices.length) {
+    return "";
+  }
+
   const selectedValue = availableServices.includes(state.system.selectedServiceName)
     ? state.system.selectedServiceName
     : "";
   const tone = feedbackTone(state.system.serviceResult.status);
   const hasFeedback = state.system.serviceResult.status !== "idle";
+  const serviceDescription = selectedValue ? getServiceDescription(selectedValue) : "";
+  const serviceUsage = selectedValue ? getServiceUsage(selectedServiceDetail?.type) : "";
 
   return `
     <section class="detail-section service-tester">
@@ -158,6 +323,9 @@ function renderServiceTester(state, selectedNodeDetail, selectedServiceDetail) {
         </div>
 
         ${selectedValue ? `
+          ${serviceDescription ? `<p class="muted">${escapeHtml(serviceDescription)}</p>` : ""}
+          ${serviceUsage ? `<p class="muted small">${escapeHtml(serviceUsage)}</p>` : ""}
+
           <div class="action-row">
             <button type="button" data-action="insert-service-template">
               Use template
@@ -197,7 +365,7 @@ function renderServiceTester(state, selectedNodeDetail, selectedServiceDetail) {
       ` : `
         <div class="empty-state">
           <h3>No services on this node.</h3>
-          <p>Select a different node to explore its services.</p>
+          <p>Select a guided service above to inspect or call it.</p>
         </div>
       `}
     </section>
@@ -206,7 +374,7 @@ function renderServiceTester(state, selectedNodeDetail, selectedServiceDetail) {
 
 export function renderSystemPage(state, context) {
   const search = state.system.searchText.trim().toLowerCase();
-  const filteredNodes = state.graph.nodes.filter((name) => name.toLowerCase().includes(search));
+  const filteredNodes = state.graph.nodes.filter((name) => matchesNodeSearch(name, search));
   const selectedNodeDetail = context.selectedNodeDetail;
   const selectedServiceDetail = context.selectedServiceDetail;
   const nodeStatusLabel = !state.connection.connected
@@ -218,7 +386,7 @@ export function renderSystemPage(state, context) {
     ? "warning"
     : "success";
   const emptyNodeState = search
-    ? `<div class="empty-state"><h3>No nodes match.</h3><p>Try a shorter search.</p></div>`
+    ? `<div class="empty-state"><h3>No nodes match.</h3><p>Try a different label or ROS name.</p></div>`
     : !state.connection.connected
       ? `<div class="empty-state"><h3>No nodes yet.</h3><p>Connect to load nodes.</p></div>`
       : state.graph.hydration.nodes === "loading"
@@ -252,16 +420,9 @@ export function renderSystemPage(state, context) {
             type="search"
             data-bind="system-search"
             value="${escapeHtml(state.system.searchText)}"
-            placeholder="Filter by node name"
+            placeholder="Filter by label or ROS name"
             autocomplete="off"
           >
-
-          <div class="toggle-row">
-            <label class="toggle">
-              <input type="checkbox" data-bind="system-show-services" ${state.system.showServices ? "checked" : ""}>
-              <span>Show service tools</span>
-            </label>
-          </div>
 
           <div class="list-stack">
             ${filteredNodes.length

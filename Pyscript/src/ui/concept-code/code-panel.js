@@ -101,7 +101,9 @@ function renderAnnotatedCode(state, viewModel) {
     }
 
     const block = segment.block;
-    const isActive = viewModel.activeCodeBlockId === block.id;
+    const isActive = viewModel.isContinuousMode
+      ? (viewModel.activeCodeBlockIds || []).includes(block.id)
+      : viewModel.activeCodeBlockId === block.id;
     const isRecent = !isActive && viewModel.recentCodeBlockId === block.id;
     const isSelected = viewModel.selectedCodeBlockId === block.id;
     const isHovered = viewModel.hoveredCodeBlockId === block.id;
@@ -177,7 +179,9 @@ export function renderCodePanel(state, viewModel) {
           ${renderPill(
             viewModel.guidedMode
               ? `Lesson ${viewModel.guidedStepNumber} of ${viewModel.guidedTotalSteps}`
-              : `Step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`,
+              : viewModel.isContinuousMode
+                ? "Simulation"
+                : `Step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`,
             "accent"
           )}
         </div>
@@ -186,7 +190,9 @@ export function renderCodePanel(state, viewModel) {
       <p class="concept-panel-copy">
         ${escapeHtml(viewModel.guidedMode
           ? "Focus on the block tied to this lesson step."
-          : "Each Python block shows its ROS role, and the active block tracks the current step.")}
+          : viewModel.isContinuousMode
+            ? "Blocks light up as their callbacks fire — multiple blocks can be active at once."
+            : "Each Python block shows its ROS role, and the active block tracks the current step.")}
       </p>
 
       ${renderSemanticLegend(viewModel)}

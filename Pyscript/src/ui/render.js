@@ -11,7 +11,7 @@ const PAGE_META = [
   { id: "system", label: "System", detail: "Nodes and services" },
   { id: "topics", label: "Topics", detail: "Pub/sub live" },
   { id: "code-flow", label: "Concept + Code", detail: "Runtime linked to Python" },
-  { id: "launch", label: "Launch", detail: "Demos and controls" },
+  // { id: "launch", label: "Launch", detail: "Demos and controls" },
 ];
 
 function connectionTone(connection) {

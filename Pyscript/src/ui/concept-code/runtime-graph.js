@@ -1,8 +1,143 @@
 import { renderPlaybackControls } from "./playback-controls.js";
+import { renderHardwareVisual } from "./hardware-visual.js";
 import { escapeHtml, renderPill } from "../utils.js";
+
+const lastValueByEdgeId = new Map();
+let lastValueContext = null;
+
+function unique(items) {
+  return [...new Set((items || []).filter(Boolean))];
+}
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function getGraphKindLabel(kind) {
+  switch (kind) {
+    case "topic":
+      return "Topic";
+    case "action":
+      return "Action";
+    case "runtime":
+      return "Runtime";
+    case "node":
+      return "Node";
+    default:
+      return "Graph element";
+  }
+}
+
+function getEdgeRoleLabel(role) {
+  switch (role) {
+    case "publish":
+      return "Publish path";
+    case "subscribe":
+      return "Delivery path";
+    case "goal":
+      return "Goal path";
+    case "feedback":
+      return "Feedback path";
+    case "result":
+      return "Result path";
+    case "runtime":
+      return "Runtime path";
+    default:
+      return "Connection";
+  }
+}
+
+function formatTooltipList(items, fallback) {
+  const visibleItems = unique(items);
+  return visibleItems.length ? visibleItems.join(", ") : fallback;
+}
+
+function formatElementLabel(nodesById, elementId, options = {}) {
+  const element = nodesById.get(elementId);
+  if (!element) {
+    return elementId;
+  }
+
+  const includeType = options.includeType === true;
+  return includeType && element.messageType
+    ? `${element.label} (${element.messageType})`
+    : element.label;
+}
+
+function buildNodeTooltip(node, edges, nodesById) {
+  if (!node) {
+    return "";
+  }
+
+  const incomingEdges = (edges || []).filter((edge) => edge.to === node.id);
+  const outgoingEdges = (edges || []).filter((edge) => edge.from === node.id);
+
+  if (node.kind === "topic") {
+    const publishers = incomingEdges
+      .filter((edge) => edge.role === "publish")
+      .map((edge) => formatElementLabel(nodesById, edge.from));
+    const subscribers = outgoingEdges
+      .filter((edge) => edge.role === "subscribe")
+      .map((edge) => formatElementLabel(nodesById, edge.to));
+
+    return [
+      `${getGraphKindLabel(node.kind)}: ${node.label}`,
+      node.meta ? `Role: ${node.meta}` : "",
+      node.messageType ? `Message type: ${node.messageType}` : "",
+      `Published by: ${formatTooltipList(publishers, "No publishers in this example")}`,
+      `Delivered to: ${formatTooltipList(subscribers, "No subscribers in this example")}`,
+      node.description || "",
+    ].filter(Boolean).join("\n");
+  }
+
+  const publishes = outgoingEdges
+    .filter((edge) => edge.role === "publish")
+    .map((edge) => formatElementLabel(nodesById, edge.to, { includeType: true }));
+  const subscribes = incomingEdges
+    .filter((edge) => edge.role === "subscribe")
+    .map((edge) => formatElementLabel(nodesById, edge.from, { includeType: true }));
+  const otherLinks = [
+    ...outgoingEdges
+      .filter((edge) => edge.role !== "publish")
+      .map((edge) => `${getEdgeRoleLabel(edge.role)} to ${formatElementLabel(nodesById, edge.to)}`),
+    ...incomingEdges
+      .filter((edge) => edge.role !== "subscribe")
+      .map((edge) => `${getEdgeRoleLabel(edge.role)} from ${formatElementLabel(nodesById, edge.from)}`),
+  ];
+
+  return [
+    `${getGraphKindLabel(node.kind)}: ${node.label}`,
+    node.meta ? `Role: ${node.meta}` : "",
+    node.messageType ? `${node.kind === "action" ? "Action type" : "Message type"}: ${node.messageType}` : "",
+    `Publishes: ${formatTooltipList(publishes, "No publish links in this example")}`,
+    `Subscribes: ${formatTooltipList(subscribes, "No subscription links in this example")}`,
+    otherLinks.length ? `Other links: ${formatTooltipList(otherLinks, "")}` : "",
+    node.description || "",
+  ].filter(Boolean).join("\n");
+}
+
+function buildEdgeTooltip(edge, nodesById) {
+  if (!edge) {
+    return "";
+  }
+
+  const fromLabel = formatElementLabel(nodesById, edge.from, { includeType: false });
+  const toLabel = formatElementLabel(nodesById, edge.to, { includeType: false });
+  const messageTypes = unique([
+    edge.messageType,
+    nodesById.get(edge.from)?.messageType,
+    nodesById.get(edge.to)?.messageType,
+  ]);
+
+  return [
+    `${getEdgeRoleLabel(edge.role)}: ${fromLabel} -> ${toLabel}`,
+    edge.label ? `Label: ${edge.label}` : "",
+    messageTypes.length ? `Message type: ${messageTypes.join(", ")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function renderGraphTooltip(text) {
+  return text ? `<title>${escapeHtml(text)}</title>` : "";
 }
 
 function getNodeBox(node) {
@@ -189,22 +324,249 @@ function renderEdgeLabel(edge, geometry) {
   `;
 }
 
-function renderToken(segment, geometry, progressMs) {
-  if (!geometry || progressMs < segment.startMs || progressMs > segment.endMs) {
+function renderValueBadge(badgeState, edge, geometry) {
+  if (!geometry || !badgeState?.label) {
     return "";
   }
 
-  const progress = (progressMs - segment.startMs) / Math.max(segment.endMs - segment.startMs, 1);
-  const point = geometry.pointAt(progress);
-  const label = segment.label || "msg";
-  const width = Math.max(54, label.length * 8 + 18);
+  const label = badgeState.label;
+  const width = Math.max(60, label.length * 8 + 22);
+  const badgeY = edge?.label ? geometry.labelY + 16 : geometry.labelY - 16;
 
   return `
-    <g class="concept-token variant-${escapeHtml(segment.variant || "publish")}" transform="translate(${point.x - (width / 2)}, ${point.y - 14})">
-      <rect width="${width}" height="28" rx="14" ry="14"></rect>
-      <text x="${width / 2}" y="18" text-anchor="middle">${escapeHtml(label)}</text>
+    <g class="concept-value-badge" transform="translate(${geometry.labelX - (width / 2)}, ${badgeY})">
+      <rect class="concept-value-badge-bg" width="${width}" height="28" rx="14" ry="14"></rect>
+      <text class="concept-value-badge-text" x="${width / 2}" y="18" text-anchor="middle">${escapeHtml(label)}</text>
     </g>
   `;
+}
+
+function renderContinuousFlowPulse(segment, geometry, simClockMs) {
+  if (!geometry || !segment) {
+    return "";
+  }
+
+  const startMs = Number(segment.startMs || 0);
+  const endMs = Number(segment.endMs || 0);
+  const durationMs = Math.max(endMs - startMs, 1);
+  const progress = clamp((Number(simClockMs || 0) - startMs) / durationMs, 0, 1);
+  const pulsePathLength = 100;
+  const pulseLength = clamp(durationMs / 40, 16, 24);
+  const pulseStart = clamp((progress * pulsePathLength) - (pulseLength / 2), 0, pulsePathLength - pulseLength);
+
+  return `
+    <path
+      class="concept-edge-flow-pulse"
+      d="${geometry.d}"
+      pathLength="${pulsePathLength}"
+      stroke-dasharray="${pulseLength.toFixed(2)} ${(pulsePathLength - pulseLength).toFixed(2)}"
+      stroke-dashoffset="${(-pulseStart).toFixed(2)}"
+    ></path>
+  `;
+}
+
+function formatVelocityMps(velocityMps) {
+  const numericVelocity = Number(velocityMps || 0);
+  return `${numericVelocity > 0 ? "+" : ""}${numericVelocity.toFixed(1)} m/s`;
+}
+
+function formatLiveDistance(meters) {
+  return `${Number(meters).toFixed(2)} m`;
+}
+
+function formatLiveVelocity(mps) {
+  const numericVelocity = Number(mps || 0);
+  return `${numericVelocity > 0 ? "+" : ""}${numericVelocity.toFixed(2)} m/s`;
+}
+
+function isTopicPipe(edge, nodesById) {
+  if (!edge) {
+    return false;
+  }
+
+  if (edge.dashed === true) {
+    return true;
+  }
+
+  const fromNode = nodesById.get(edge.from);
+  const toNode = nodesById.get(edge.to);
+  return fromNode?.kind === "topic" || toNode?.kind === "topic";
+}
+
+function getContinuousTokensToRender(tokens, progressMs) {
+  return (tokens || [])
+    .filter((token) => progressMs >= token.startMs && progressMs <= token.endMs);
+}
+
+function buildLatestSegmentByEdgeId(segments) {
+  const latestSegmentByEdgeId = new Map();
+
+  (segments || []).forEach((segment) => {
+    if (!segment?.edgeId) {
+      return;
+    }
+
+    const currentSegment = latestSegmentByEdgeId.get(segment.edgeId);
+    if (!currentSegment || segment.startMs >= currentSegment.startMs) {
+      latestSegmentByEdgeId.set(segment.edgeId, segment);
+    }
+  });
+
+  return latestSegmentByEdgeId;
+}
+
+function buildSegmentsByEdgeId(segments) {
+  const segmentsByEdgeId = new Map();
+
+  (segments || []).forEach((segment) => {
+    if (!segment?.edgeId) {
+      return;
+    }
+
+    const existingSegments = segmentsByEdgeId.get(segment.edgeId);
+    if (existingSegments) {
+      existingSegments.push(segment);
+      return;
+    }
+
+    segmentsByEdgeId.set(segment.edgeId, [segment]);
+  });
+
+  return segmentsByEdgeId;
+}
+
+function clearPersistedEdgeValues() {
+  lastValueByEdgeId.clear();
+}
+
+function getPlaybackMode(viewModel) {
+  if (viewModel.guidedMode) {
+    return "guided";
+  }
+
+  return viewModel.isContinuousMode ? "continuous" : "step";
+}
+
+function shouldResetPersistedEdgeValues(currentContext) {
+  const previousContext = lastValueContext;
+  if (!previousContext) {
+    return false;
+  }
+
+  if (previousContext.templateId !== currentContext.templateId) {
+    return true;
+  }
+
+  if (previousContext.mode !== currentContext.mode) {
+    return true;
+  }
+
+  if (currentContext.mode === "step") {
+    if (currentContext.activeEventIndex < previousContext.activeEventIndex) {
+      return true;
+    }
+
+    if (
+      currentContext.activeEventIndex === previousContext.activeEventIndex
+      && currentContext.progressMs < previousContext.progressMs
+    ) {
+      return true;
+    }
+
+    if (
+      currentContext.activeEventIndex === 0
+      && currentContext.progressMs === 0
+      && (previousContext.activeEventIndex !== 0 || previousContext.progressMs !== 0)
+    ) {
+      return true;
+    }
+  }
+
+  if (currentContext.mode === "continuous") {
+    if (currentContext.simClockMs < previousContext.simClockMs) {
+      return true;
+    }
+
+    if (
+      currentContext.simClockMs === 0
+      && currentContext.activeTokenCount === 0
+      && (previousContext.simClockMs > 0 || previousContext.activeTokenCount > 0)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function syncPersistedEdgeValues(state, viewModel, startedSegmentByEdgeId, activeSegmentByEdgeId) {
+  const playback = state?.conceptCode?.playback || {};
+  const currentContext = {
+    templateId: viewModel.template.id,
+    mode: getPlaybackMode(viewModel),
+    activeEventIndex: Number(playback.activeEventIndex || 0),
+    progressMs: Number(playback.progressMs || 0),
+    simClockMs: Number(playback.simClockMs || 0),
+    activeTokenCount: Array.isArray(playback.activeTokens) ? playback.activeTokens.length : 0,
+  };
+
+  if (shouldResetPersistedEdgeValues(currentContext) || currentContext.mode === "guided") {
+    clearPersistedEdgeValues();
+  }
+
+  const sourceSegments = currentContext.mode === "continuous"
+    ? [...activeSegmentByEdgeId.values()]
+    : [...startedSegmentByEdgeId.values()];
+
+  sourceSegments.forEach((segment) => {
+    if (!segment?.edgeId || !segment?.label) {
+      return;
+    }
+
+    const existing = lastValueByEdgeId.get(segment.edgeId);
+    if (!existing) {
+      lastValueByEdgeId.set(segment.edgeId, {
+        label: segment.label,
+      });
+      return;
+    }
+
+    if (existing.label !== segment.label) {
+      lastValueByEdgeId.set(segment.edgeId, {
+        label: segment.label,
+      });
+    }
+  });
+
+  lastValueContext = currentContext;
+}
+
+function syncContinuousRoverBadgeValues(viewModel) {
+  if (!viewModel.isContinuousMode || !viewModel.continuousRoverStatus) {
+    return;
+  }
+
+  const {
+    liveFrontDistanceMeters,
+    liveRearDistanceMeters,
+    appliedMotorSpeedMps,
+  } = viewModel.continuousRoverStatus;
+
+  lastValueByEdgeId.set("edge:rover:front_sensor_to_front_range", {
+    label: formatLiveDistance(liveFrontDistanceMeters),
+  });
+  lastValueByEdgeId.set("edge:rover:front_range_to_controller", {
+    label: `front ${formatLiveDistance(liveFrontDistanceMeters)}`,
+  });
+  lastValueByEdgeId.set("edge:rover:rear_sensor_to_rear_range", {
+    label: formatLiveDistance(liveRearDistanceMeters),
+  });
+  lastValueByEdgeId.set("edge:rover:rear_range_to_controller", {
+    label: `rear ${formatLiveDistance(liveRearDistanceMeters)}`,
+  });
+  lastValueByEdgeId.set("edge:rover:controller_to_cmd_vel", {
+    label: formatLiveVelocity(appliedMotorSpeedMps),
+  });
 }
 
 export function renderRuntimeGraphPanel(state, viewModel) {
@@ -216,67 +578,134 @@ export function renderRuntimeGraphPanel(state, viewModel) {
   const nodes = viewModel.template.graph.nodes.map((node) => offsetNode(node, graphOffset));
   const edges = viewModel.template.graph.edges.map((edge) => offsetEdge(edge, graphOffset));
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const edgeTooltipsById = new Map(edges.map((edge) => [edge.id, buildEdgeTooltip(edge, nodesById)]));
+  const nodeTooltipsById = new Map(nodes.map((node) => [node.id, buildNodeTooltip(node, edges, nodesById)]));
+  const graphPill = viewModel.guidedMode
+    ? `Lesson ${viewModel.guidedStepNumber} of ${viewModel.guidedTotalSteps}`
+    : viewModel.isContinuousMode
+      ? `${(viewModel.simClockMs / 1000).toFixed(1)}s / ${(viewModel.simTotalDurationMs / 1000).toFixed(1)}s`
+      : `Step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`;
+  const graphHeading = viewModel.isContinuousMode
+    ? "How live messages move through ROS"
+    : "How this step moves through ROS";
+  const continuousStatus = viewModel.continuousRoverStatus;
+  const simulationCopy = viewModel.template.simulation?.copy || {};
+  const graphCopy = viewModel.guidedMode
+    ? "Guided mode keeps the picture focused on the one path that matters for this step."
+    : viewModel.isContinuousMode
+      ? (continuousStatus
+        ? `The rover picture shows the live gap now. The value badges show sampled readings and speed commands moving through ROS.${continuousStatus
+          ? ` Motor applying ${formatVelocityMps(continuousStatus.appliedMotorSpeedMps)} now${continuousStatus.queuedNextSpeedMps !== null ? `; queued next ${formatVelocityMps(continuousStatus.queuedNextSpeedMps)}.` : "."}`
+          : ""}`
+        : simulationCopy.graph || "Live message pulses show how data moves through ROS right now.")
+      : "The highlighted shapes show where the current step is happening in ROS.";
+  const animationProgressMs = viewModel.isContinuousMode ? viewModel.simClockMs : viewModel.progressMs;
+  const stepStartedSegments = !viewModel.isContinuousMode && !viewModel.guidedMode
+    ? eventSegments.filter((segment) => animationProgressMs >= segment.startMs)
+    : [];
+  const activeAnimatedSegments = viewModel.isContinuousMode
+    ? getContinuousTokensToRender(viewModel.activeTokens || [], animationProgressMs)
+    : eventSegments.filter((segment) => animationProgressMs >= segment.startMs && animationProgressMs <= segment.endMs);
+  const startedSegmentByEdgeId = buildLatestSegmentByEdgeId(stepStartedSegments);
+  const activeSegmentByEdgeId = buildLatestSegmentByEdgeId(activeAnimatedSegments);
+  const activeSegmentsByEdgeId = buildSegmentsByEdgeId(activeAnimatedSegments);
+  syncPersistedEdgeValues(state, viewModel, startedSegmentByEdgeId, activeSegmentByEdgeId);
+  syncContinuousRoverBadgeValues(viewModel);
+  const activeEdgeIds = new Set(activeSegmentByEdgeId.keys());
 
   return `
     <section class="panel concept-runtime-panel concept-stage-panel">
       <div class="section-head">
         <div>
           <p class="eyebrow">ROS flow</p>
-          <h3>How this step moves through ROS</h3>
+          <h3>${escapeHtml(graphHeading)}</h3>
         </div>
-        ${renderPill(
-          viewModel.guidedMode
-            ? `Lesson ${viewModel.guidedStepNumber} of ${viewModel.guidedTotalSteps}`
-            : `Step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`,
-          "accent"
-        )}
+        ${renderPill(graphPill, "accent")}
       </div>
 
       <p class="concept-panel-copy">
-        ${escapeHtml(viewModel.guidedMode
-          ? "Guided mode keeps the picture focused on the one path that matters for this step."
-          : "The highlighted shapes show where the current step is happening in ROS.")}
+        ${escapeHtml(graphCopy)}
       </p>
+
+      ${viewModel.guidedMode ? "" : `
+        <aside
+          class="concept-playback-dock"
+          aria-label="Playback controls"
+          style="position: static; right: auto; bottom: auto; max-width: 100%; margin: 0.35rem 0 0.85rem;"
+        >
+          ${renderPlaybackControls(state, viewModel)}
+        </aside>
+      `}
 
       <div class="concept-graph-shell">
         <svg class="concept-graph-svg" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}" aria-label="Concept and runtime graph">
-          <defs>
-            <marker id="concept-arrowhead" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
-              <path d="M 0 0 L 11 5.5 L 0 11 z" fill="rgba(20, 108, 114, 0.78)"></path>
-            </marker>
-          </defs>
-
           ${edges.map((edge) => {
             const geometry = getEdgeGeometry(edge, nodesById);
-            const isHighlighted = viewModel.highlightedGraphElementIds.includes(edge.id);
-            const isActive = viewModel.activeGraphElementIds.includes(edge.id);
+            const isStepStarted = startedSegmentByEdgeId.has(edge.id);
+            const isFlowing = viewModel.isContinuousMode && activeEdgeIds.has(edge.id);
+            const isActive = viewModel.guidedMode
+              ? viewModel.activeGraphElementIds.includes(edge.id)
+              : viewModel.isContinuousMode
+                ? false
+              : isStepStarted;
+            const isHighlighted = viewModel.guidedMode
+              ? viewModel.highlightedGraphElementIds.includes(edge.id)
+              : viewModel.isContinuousMode
+                ? false
+              : viewModel.linkedGraphElementIds.includes(edge.id);
             const isSelected = viewModel.selectedGraphElementId === edge.id;
             const isHovered = viewModel.hoveredGraphElementId === edge.id;
-            const isDimmed = viewModel.shouldDimGraph && !isActive && !isSelected && !isHovered && !isHighlighted;
+            const isDimmed = !viewModel.isContinuousMode
+              && viewModel.shouldDimGraph
+              && !isActive
+              && !isSelected
+              && !isHovered
+              && !isHighlighted;
             const isGuidedTarget = viewModel.guidedMode && viewModel.guidedTargetGraphElementIds.includes(edge.id);
             const isGuidedSolved = isGuidedTarget && viewModel.guidedShowExplanation;
+            const topicPipeClass = isTopicPipe(edge, nodesById) ? "topic-dashed" : "";
+            const activePulseSegment = activeSegmentByEdgeId.get(edge.id) || null;
+            const activeFlowSegments = viewModel.isContinuousMode
+              ? activeSegmentsByEdgeId.get(edge.id) || []
+              : [];
+            const badgeState = activePulseSegment?.label
+              ? lastValueByEdgeId.get(edge.id) || { label: activePulseSegment.label }
+              : lastValueByEdgeId.get(edge.id) || null;
 
             return `
               <g
-                class="concept-edge-group ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isDimmed ? "dimmed" : ""} ${isGuidedTarget ? "guided-target" : ""} ${isGuidedSolved ? "guided-solved" : ""}"
+                class="concept-edge-group ${isActive ? "active" : ""} ${isFlowing ? "flowing" : ""} ${isSelected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isDimmed ? "dimmed" : ""} ${isGuidedTarget ? "guided-target" : ""} ${isGuidedSolved ? "guided-solved" : ""}"
                 data-action="select-concept-graph-element"
                 data-element-id="${escapeHtml(edge.id)}"
                 data-concept-hover-type="graph-element"
                 data-concept-hover-id="${escapeHtml(edge.id)}"
               >
-                <path class="concept-edge ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""}" d="${geometry?.d || ""}" marker-end="url(#concept-arrowhead)"></path>
-                ${geometry ? renderEdgeLabel(edge, geometry) : ""}
+                ${renderGraphTooltip(edgeTooltipsById.get(edge.id) || "")}
+                <path class="concept-edge-outer ${topicPipeClass} ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""}" d="${geometry?.d || ""}"></path>
+                <path class="concept-edge-inner ${isHighlighted ? "linked" : ""} ${isActive ? "active" : ""}" d="${geometry?.d || ""}"></path>
+                ${activeFlowSegments.map((segment) => renderContinuousFlowPulse(segment, geometry, animationProgressMs)).join("")}
+                ${renderValueBadge(badgeState, edge, geometry)}
+                ${geometry && edge.label ? renderEdgeLabel(edge, geometry) : ""}
               </g>
             `;
           }).join("")}
 
           ${nodes.map((node) => {
             const geometry = getNodeGeometry(node);
-            const isHighlighted = viewModel.highlightedGraphElementIds.includes(node.id);
-            const isActive = viewModel.activeGraphElementIds.includes(node.id);
+            const isHighlighted = viewModel.isContinuousMode
+              ? false
+              : viewModel.highlightedGraphElementIds.includes(node.id);
+            const isActive = viewModel.isContinuousMode
+              ? false
+              : viewModel.activeGraphElementIds.includes(node.id);
             const isSelected = viewModel.selectedGraphElementId === node.id;
             const isHovered = viewModel.hoveredGraphElementId === node.id;
-            const isDimmed = viewModel.shouldDimGraph && !isActive && !isSelected && !isHovered && !isHighlighted;
+            const isDimmed = !viewModel.isContinuousMode
+              && viewModel.shouldDimGraph
+              && !isActive
+              && !isSelected
+              && !isHovered
+              && !isHighlighted;
             const isGuidedTarget = viewModel.guidedMode && viewModel.guidedTargetGraphElementIds.includes(node.id);
             const isGuidedSolved = isGuidedTarget && viewModel.guidedShowExplanation;
 
@@ -288,28 +717,17 @@ export function renderRuntimeGraphPanel(state, viewModel) {
                 data-concept-hover-type="graph-element"
                 data-concept-hover-id="${escapeHtml(node.id)}"
               >
+                ${renderGraphTooltip(nodeTooltipsById.get(node.id) || "")}
                 <rect x="${geometry.left}" y="${geometry.top}" width="${geometry.width}" height="${geometry.height}" rx="22" ry="22"></rect>
                 <text class="concept-node-label" x="${geometry.x}" y="${geometry.y - 6}" text-anchor="middle">${escapeHtml(node.label)}</text>
                 <text class="concept-node-meta" x="${geometry.x}" y="${geometry.y + 16}" text-anchor="middle">${escapeHtml(node.meta || node.kind)}</text>
               </g>
             `;
           }).join("")}
-
-          ${eventSegments.map((segment) => {
-            const geometry = getEdgeGeometry(
-              edges.find((edge) => edge.id === segment.edgeId),
-              nodesById
-            );
-            return renderToken(segment, geometry, viewModel.progressMs);
-          }).join("")}
         </svg>
-
-        ${viewModel.guidedMode ? "" : `
-          <aside class="concept-playback-dock" aria-label="Playback controls">
-            ${renderPlaybackControls(state, viewModel)}
-          </aside>
-        `}
       </div>
+
+      ${renderHardwareVisual(viewModel)}
     </section>
   `;
 }

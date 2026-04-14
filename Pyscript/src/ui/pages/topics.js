@@ -1,6 +1,16 @@
 import { simpleTopicEditorFor } from "../../core/message-templates.js";
+import { CUSTOM_TOPIC_TYPE_OPTION, DEFAULT_DRAFT_TOPIC_TYPE } from "../../state.js";
 import { renderTopicFlowVisualizer } from "../topics/flow-visualizer.js";
 import { escapeHtml, feedbackTone, renderInlineList, renderPill, renderTag } from "../utils.js";
+
+const QUICK_TOPIC_TYPE_OPTIONS = [
+  { value: DEFAULT_DRAFT_TOPIC_TYPE, label: "Text message" },
+  { value: "std_msgs/msg/Bool", label: "True / false" },
+  { value: "std_msgs/msg/Int32", label: "Whole number" },
+  { value: "std_msgs/msg/Float32", label: "Decimal number" },
+  { value: "geometry_msgs/msg/Twist", label: "Robot twist command" },
+  { value: CUSTOM_TOPIC_TYPE_OPTION, label: "Custom ROS type" },
+];
 
 function renderTopicRow(name, detail, isSelected) {
   const topicType = detail?.type || "Loading...";
@@ -30,18 +40,20 @@ function renderRelationshipList(items) {
   );
 }
 
-function renderSimpleComposer(editor, composer) {
+function renderSimpleComposer(editor, composer, bindingPrefix) {
   if (!editor) {
     return "";
   }
 
+  const fieldId = `${bindingPrefix}-${editor.kind === "boolean" ? "bool" : editor.kind}`;
+
   if (editor.kind === "text") {
     return `
-      <label class="field-label" for="topic-simple-text">${escapeHtml(editor.label)}</label>
+      <label class="field-label" for="${escapeHtml(fieldId)}">${escapeHtml(editor.label)}</label>
       <input
-        id="topic-simple-text"
+        id="${escapeHtml(fieldId)}"
         type="text"
-        data-bind="topic-simple-text"
+        data-bind="${escapeHtml(fieldId)}"
         value="${escapeHtml(composer.simpleText)}"
         autocomplete="off"
       >
@@ -51,21 +63,137 @@ function renderSimpleComposer(editor, composer) {
   if (editor.kind === "boolean") {
     return `
       <label class="toggle">
-        <input type="checkbox" data-bind="topic-simple-bool" ${composer.simpleBool ? "checked" : ""}>
+        <input type="checkbox" data-bind="${escapeHtml(fieldId)}" ${composer.simpleBool ? "checked" : ""}>
         <span>${escapeHtml(editor.label)}</span>
       </label>
     `;
   }
 
   return `
-    <label class="field-label" for="topic-simple-number">${escapeHtml(editor.label)}</label>
+    <label class="field-label" for="${escapeHtml(fieldId)}">${escapeHtml(editor.label)}</label>
     <input
-      id="topic-simple-number"
+      id="${escapeHtml(fieldId)}"
       type="number"
       step="${escapeHtml(editor.step || "any")}"
-      data-bind="topic-simple-number"
+      data-bind="${escapeHtml(fieldId)}"
       value="${escapeHtml(composer.simpleNumber)}"
     >
+  `;
+}
+
+function renderFeedbackCallout(feedback) {
+  if (!feedback?.message || feedback.status === "idle") {
+    return "";
+  }
+
+  const feedbackClass = feedbackTone(feedback.status);
+  return `
+    <div class="callout callout-${feedbackClass}">
+      ${escapeHtml(feedback.message)}
+    </div>
+  `;
+}
+
+function renderDraftTopicSection(state) {
+  const draft = state.topics.draft;
+  const usingCustomType = draft.type === CUSTOM_TOPIC_TYPE_OPTION;
+  const editor = usingCustomType ? null : simpleTopicEditorFor(draft.type);
+  const mode = editor ? draft.composer.mode : "raw";
+  const showRawEditor = !editor || mode === "raw";
+  const showTemplateButton = !editor || mode === "raw";
+
+  return `
+    <section class="detail-section">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">New topic</p>
+          <h3>Create a topic for quick testing</h3>
+        </div>
+        <div class="action-row">
+          ${renderPill("Create mode", "accent")}
+          <button type="button" data-action="hide-draft-topic">Back to topics</button>
+        </div>
+      </div>
+
+      <p class="muted">Name the topic, choose its message type, then open it in the normal topic workspace.</p>
+
+      <label class="field-label" for="draft-topic-name">Topic name</label>
+      <input
+        id="draft-topic-name"
+        type="text"
+        data-bind="draft-topic-name"
+        value="${escapeHtml(draft.name)}"
+        placeholder="/classroom/chat"
+        autocomplete="off"
+      >
+
+      <label class="field-label" for="draft-topic-type">Message type</label>
+      <select id="draft-topic-type" data-bind="draft-topic-type">
+        ${QUICK_TOPIC_TYPE_OPTIONS.map((option) => `
+          <option value="${escapeHtml(option.value)}" ${draft.type === option.value ? "selected" : ""}>
+            ${escapeHtml(option.label)}
+          </option>
+        `).join("")}
+      </select>
+
+      ${usingCustomType ? `
+        <label class="field-label" for="draft-topic-custom-type">Custom ROS type</label>
+        <input
+          id="draft-topic-custom-type"
+          type="text"
+          data-bind="draft-topic-custom-type"
+          value="${escapeHtml(draft.customType)}"
+          placeholder="example_interfaces/msg/String"
+          autocomplete="off"
+        >
+      ` : ""}
+
+      ${editor ? `
+        <div class="mode-switch">
+          <button
+            type="button"
+            class="${mode === "simple" ? "active" : ""}"
+            data-action="set-draft-publish-mode"
+            data-mode="simple"
+          >
+            Simple form
+          </button>
+          <button
+            type="button"
+            class="${mode === "raw" ? "active" : ""}"
+            data-action="set-draft-publish-mode"
+            data-mode="raw"
+          >
+            Raw JSON
+          </button>
+        </div>
+      ` : ""}
+
+      ${editor && mode === "simple" ? `
+        <div class="simple-editor">
+          ${renderSimpleComposer(editor, draft.composer, "draft-topic-simple")}
+        </div>
+        <p class="muted small">Switch to Raw JSON if you want the full payload.</p>
+      ` : ""}
+
+      ${showRawEditor ? `
+        <label class="field-label" for="draft-topic-raw">${editor ? "Raw JSON payload" : "JSON payload"}</label>
+        <textarea
+          id="draft-topic-raw"
+          class="payload-box"
+          spellcheck="false"
+          data-bind="draft-topic-raw"
+        >${escapeHtml(draft.composer.rawText)}</textarea>
+        <p class="muted small">Use the template to start from a safe example.</p>
+      ` : ""}
+
+      <div class="action-row">
+        ${showTemplateButton ? '<button type="button" data-action="insert-draft-topic-template">Use template</button>' : ""}
+        <button type="button" data-action="open-draft-topic">Open topic</button>
+      </div>
+
+      ${renderFeedbackCallout(draft.result)}
+    </section>
   `;
 }
 
@@ -74,7 +202,7 @@ function renderTopicDetail(state, detail) {
     return `
       <div class="empty-state">
         <h3>No topic selected.</h3>
-        <p>Select a topic to see details.</p>
+        <p>Select a topic from the list, or use + New topic.</p>
       </div>
     `;
   }
@@ -104,13 +232,16 @@ function renderTopicDetail(state, detail) {
   const showTemplateButton = !editor || mode === "raw";
 
   return `
-    <section class="detail-stack">
+    <section class="detail-stack" data-topic-detail>
       <div class="section-head">
         <div>
           <p class="eyebrow">Selected Topic</p>
           <h2>${escapeHtml(detail.name)}</h2>
         </div>
-        ${renderPill("Topic", "accent")}
+        <div class="action-row">
+          ${renderPill(detail.localOnly ? "Custom topic" : "Topic", "accent")}
+          ${detail.localOnly ? '<button type="button" data-action="close-topic">Destroy topic</button>' : ""}
+        </div>
       </div>
 
       <div class="facts-grid">
@@ -202,7 +333,7 @@ function renderTopicDetail(state, detail) {
 
         ${editor && mode === "simple" ? `
           <div class="simple-editor">
-            ${renderSimpleComposer(editor, state.topics.composer)}
+            ${renderSimpleComposer(editor, state.topics.composer, "topic-simple")}
           </div>
           <p class="muted small">Need the full payload? Switch to Raw JSON.</p>
         ` : ""}
@@ -264,7 +395,7 @@ export function renderTopicsPage(state, context) {
       <article class="panel page-intro">
         <div class="page-intro-copy">
           <p class="eyebrow">Topics</p>
-          <h2>Inspect a topic's type, connections, and live messages.</h2>
+          <h2>Inspect a topic's type, or create your own and exchange messages.</h2>
         </div>
         <div class="page-intro-side">
           ${renderPill(topicStatusLabel, topicStatusTone)}
@@ -307,10 +438,23 @@ export function renderTopicsPage(state, context) {
               )).join("")
               : emptyTopicState}
           </div>
+
+          <button
+            type="button"
+            class="list-button ${state.topics.creatingTopic ? "active" : ""}"
+            data-action="show-draft-topic"
+          >
+            <span class="list-title">+ New topic</span>
+            <span class="list-meta">Create your own topic in a separate workspace.</span>
+          </button>
         </section>
 
         <section class="panel detail-panel">
-          ${renderTopicDetail(state, selectedTopicDetail)}
+          <div class="detail-stack">
+            ${state.topics.creatingTopic
+              ? renderDraftTopicSection(state)
+              : renderTopicDetail(state, selectedTopicDetail)}
+          </div>
         </section>
       </div>
     </section>

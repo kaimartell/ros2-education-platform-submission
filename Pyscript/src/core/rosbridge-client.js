@@ -217,6 +217,8 @@ export class RosbridgeClient {
 
     const currentType = this.advertisedTopics.get(topic);
     if (currentType !== type) {
+      // DEBUG: remove after fixing echo/publish
+      console.debug("[rosbridge] advertise:", topic, type);
       this._send({
         op: "advertise",
         topic,
@@ -225,11 +227,29 @@ export class RosbridgeClient {
       this.advertisedTopics.set(topic, type);
     }
 
+    // DEBUG: remove after fixing echo/publish
+    console.debug("[rosbridge] publish:", topic, message);
     this._send({
       op: "publish",
       topic,
       msg: message,
     });
+  }
+
+  unadvertise(topic) {
+    const topicName = String(topic || "").trim();
+    if (!topicName) {
+      return;
+    }
+
+    if (this.isConnected() && this.advertisedTopics.has(topicName)) {
+      this._send({
+        op: "unadvertise",
+        topic: topicName,
+      });
+    }
+
+    this.advertisedTopics.delete(topicName);
   }
 
   subscribe(topic, type, onMessage) {
@@ -245,6 +265,8 @@ export class RosbridgeClient {
       onMessage,
     });
 
+    // DEBUG: remove after fixing echo/publish
+    console.debug("[rosbridge] subscribe:", id, topic, type);
     this._send({
       op: "subscribe",
       id,
@@ -285,6 +307,11 @@ export class RosbridgeClient {
       return;
     }
 
+    // DEBUG: remove after fixing echo/publish
+    if (payload.op !== "service_response") {
+      console.debug("[rosbridge] incoming:", payload.op, payload.topic || payload.id || "", payload);
+    }
+
     if (payload.op === "service_response" && typeof payload.id === "string") {
       const pending = this.pendingCalls.get(payload.id);
       if (!pending) {
@@ -303,15 +330,21 @@ export class RosbridgeClient {
     }
 
     if (payload.op === "publish") {
+      let matched = false;
       for (const subscription of this.subscriptions.values()) {
         if (subscription.topic !== payload.topic) {
           continue;
         }
+        matched = true;
         try {
           subscription.onMessage(payload.msg);
         } catch (_error) {
           // UI callbacks should not break websocket handling.
         }
+      }
+      // DEBUG: remove after fixing echo/publish
+      if (!matched && this.subscriptions.size > 0) {
+        console.warn("[rosbridge] publish on", payload.topic, "but no subscription matched. Active subs:", [...this.subscriptions.values()].map(s => s.topic));
       }
     }
   }

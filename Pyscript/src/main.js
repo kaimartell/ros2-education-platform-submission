@@ -14,6 +14,7 @@ import { RosbridgeClient } from "./core/rosbridge-client.js";
 import { RosIntrospection } from "./core/ros-introspection.js";
 import {
   APP_PAGES,
+  CUSTOM_TOPIC_TYPE_OPTION,
   createCatalogState,
   createConceptCodeDockState,
   createConceptCodeState,
@@ -61,10 +62,268 @@ let conceptCodeExplanationCuePhase = "a";
 let conceptCodeExplanationCueTimeoutId = null;
 let conceptCodeActiveBlockScrollKey = "";
 let conceptCodeActiveBlockScrollTimeoutId = null;
+let conceptCodeSimFrameId = null;
+let conceptCodeSimLastFrameTime = 0;
+let conceptCodeSimFireCounters = new Map();
 let renderQueued = false;
+const ROVER_SIM_TEMPLATE_ID = "distance-aware-rover";
+const ROVER_SIM_CORRIDOR_WIDTH_METERS = 2.0;
+const ROVER_SIM_INITIAL_CENTER_METERS = 0.7;
+const ROVER_FRONT_STOP_DISTANCE_METERS = 0.5;
+const ROVER_REAR_STOP_DISTANCE_METERS = 0.4;
+const ROVER_FORWARD_SPEED_MPS = 0.3;
+const ROVER_REVERSE_SPEED_MPS = -0.2;
+const ROVER_MOTOR_DRIVER_EDGE_ID = "edge:rover:cmd_vel_to_motor_driver";
 
 function normalizePage(pageName) {
   return APP_PAGES.includes(pageName) ? pageName : "learn";
+}
+
+function clampRoverSimValue(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isRoverConceptCodeTemplate(template) {
+  return template?.id === ROVER_SIM_TEMPLATE_ID;
+}
+
+function getRoverDirection(commandedVelocityMps) {
+  if (commandedVelocityMps > 0) {
+    return "forward";
+  }
+
+  if (commandedVelocityMps < 0) {
+    return "reverse";
+  }
+
+  return "stopped";
+}
+
+function normalizeRoverPendingCommandApplications(commandApplications) {
+  return (Array.isArray(commandApplications) ? commandApplications : [])
+    .map((entry) => ({
+      remainingMs: Number(entry?.remainingMs),
+      velocityMps: entry?.velocityMps === null || entry?.velocityMps === undefined
+        ? Number.NaN
+        : Number(entry.velocityMps),
+    }))
+    .filter((entry) => Number.isFinite(entry.remainingMs) && entry.remainingMs >= 0 && Number.isFinite(entry.velocityMps))
+    .sort((left, right) => left.remainingMs - right.remainingMs);
+}
+
+function syncRoverSimState(roverSim) {
+  const corridorWidthMeters = Number(roverSim?.corridorWidthMeters) > 0
+    ? Number(roverSim.corridorWidthMeters)
+    : ROVER_SIM_CORRIDOR_WIDTH_METERS;
+  const roverCenterMeters = clampRoverSimValue(Number(roverSim?.roverCenterMeters ?? ROVER_SIM_INITIAL_CENTER_METERS), 0, corridorWidthMeters);
+  const rearDistance = roverCenterMeters;
+  const frontDistance = Math.max(0, corridorWidthMeters - roverCenterMeters);
+  const pendingCommandApplications = normalizeRoverPendingCommandApplications(roverSim?.pendingCommandApplications);
+  const latestPendingVelocityMps = pendingCommandApplications.length
+    ? pendingCommandApplications[pendingCommandApplications.length - 1].velocityMps
+    : null;
+  const roverVelocityMps = Number.isFinite(Number(roverSim?.roverVelocityMps))
+    ? Number(roverSim.roverVelocityMps)
+    : 0;
+  const commandedVelocityMps = Number.isFinite(Number(roverSim?.commandedVelocityMps))
+    ? Number(roverSim.commandedVelocityMps)
+    : (latestPendingVelocityMps ?? roverVelocityMps);
+  const lastFrontSampleMeters = Number.isFinite(Number(roverSim?.lastFrontSampleMeters))
+    ? Number(roverSim.lastFrontSampleMeters)
+    : null;
+  const lastRearSampleMeters = Number.isFinite(Number(roverSim?.lastRearSampleMeters))
+    ? Number(roverSim.lastRearSampleMeters)
+    : null;
+  const lastFrontSampleAtMs = Number.isFinite(Number(roverSim?.lastFrontSampleAtMs))
+    ? Number(roverSim.lastFrontSampleAtMs)
+    : null;
+  const lastRearSampleAtMs = Number.isFinite(Number(roverSim?.lastRearSampleAtMs))
+    ? Number(roverSim.lastRearSampleAtMs)
+    : null;
+
+  return {
+    corridorWidthMeters,
+    roverCenterMeters,
+    roverVelocityMps,
+    commandedVelocityMps,
+    roverDirection: getRoverDirection(roverVelocityMps),
+    frontDistance,
+    rearDistance,
+    pendingCommandApplications,
+    lastFrontSampleMeters,
+    lastRearSampleMeters,
+    lastFrontSampleAtMs,
+    lastRearSampleAtMs,
+  };
+}
+
+function createDefaultRoverSimState() {
+  return syncRoverSimState({
+    corridorWidthMeters: ROVER_SIM_CORRIDOR_WIDTH_METERS,
+    roverCenterMeters: ROVER_SIM_INITIAL_CENTER_METERS,
+    roverVelocityMps: 0,
+    commandedVelocityMps: 0,
+    pendingCommandApplications: [],
+  });
+}
+
+function getInitialContinuousRoverSimState(template) {
+  return isRoverConceptCodeTemplate(template) ? createDefaultRoverSimState() : null;
+}
+
+function advanceRoverSimState(roverSim, deltaMs) {
+  let currentState = syncRoverSimState(roverSim);
+  let remainingMs = Math.max(0, Number(deltaMs) || 0);
+
+  while (remainingMs > 0) {
+    const pendingCommandApplications = normalizeRoverPendingCommandApplications(currentState.pendingCommandApplications);
+    const nextCommandApplication = pendingCommandApplications[0] || null;
+    const stepMs = nextCommandApplication
+      ? Math.min(remainingMs, nextCommandApplication.remainingMs)
+      : remainingMs;
+
+    if (stepMs > 0) {
+      const nextCenterMeters = clampRoverSimValue(
+        currentState.roverCenterMeters + (currentState.roverVelocityMps * (stepMs / 1000)),
+        0,
+        currentState.corridorWidthMeters
+      );
+      currentState = syncRoverSimState({
+        ...currentState,
+        roverCenterMeters: nextCenterMeters,
+        pendingCommandApplications: pendingCommandApplications.map((entry) => ({
+          ...entry,
+          remainingMs: Math.max(0, entry.remainingMs - stepMs),
+        })),
+      });
+      remainingMs -= stepMs;
+      continue;
+    }
+
+    if (!nextCommandApplication) {
+      break;
+    }
+
+    currentState = syncRoverSimState({
+      ...currentState,
+      roverVelocityMps: nextCommandApplication.velocityMps,
+      pendingCommandApplications: pendingCommandApplications.slice(1),
+    });
+  }
+
+  const readyCommands = normalizeRoverPendingCommandApplications(currentState.pendingCommandApplications);
+  while (readyCommands.length && readyCommands[0].remainingMs <= 0) {
+    const [nextCommandApplication, ...rest] = readyCommands;
+    currentState = syncRoverSimState({
+      ...currentState,
+      roverVelocityMps: nextCommandApplication.velocityMps,
+      pendingCommandApplications: rest,
+    });
+    readyCommands.splice(0, readyCommands.length, ...normalizeRoverPendingCommandApplications(currentState.pendingCommandApplications));
+  }
+
+  return currentState;
+}
+
+function getRoverMotorDriverApplyDelayMs(stream) {
+  return Number(stream?.publishAnimation?.durationMs || 0)
+    + Number(stream?.deliverAnimation?.durationMs || 0);
+}
+
+function queueRoverCommandApplication(roverSim, velocityMps, applyDelayMs) {
+  if (!Number.isFinite(Number(velocityMps)) || !Number.isFinite(Number(applyDelayMs))) {
+    return syncRoverSimState(roverSim);
+  }
+
+  const currentState = syncRoverSimState(roverSim);
+  return syncRoverSimState({
+    ...currentState,
+    commandedVelocityMps: Number(velocityMps),
+    pendingCommandApplications: [
+      ...normalizeRoverPendingCommandApplications(currentState.pendingCommandApplications),
+      {
+        remainingMs: Math.max(0, Number(applyDelayMs)),
+        velocityMps: Number(velocityMps),
+      },
+    ],
+  });
+}
+
+function recordRoverSensorSample(roverSim, stream, roverSample, fireTimeMs) {
+  const currentState = syncRoverSimState(roverSim);
+  const sampledHardwareState = roverSample?.hardwareState || null;
+  const sampledAtMs = Number.isFinite(Number(fireTimeMs)) ? Number(fireTimeMs) : null;
+
+  if (stream?.id === "front-sensor-stream" && Number.isFinite(Number(sampledHardwareState?.frontDistance))) {
+    return syncRoverSimState({
+      ...currentState,
+      lastFrontSampleMeters: Number(sampledHardwareState.frontDistance),
+      lastFrontSampleAtMs: sampledAtMs,
+    });
+  }
+
+  if (stream?.id === "rear-sensor-stream" && Number.isFinite(Number(sampledHardwareState?.rearDistance))) {
+    return syncRoverSimState({
+      ...currentState,
+      lastRearSampleMeters: Number(sampledHardwareState.rearDistance),
+      lastRearSampleAtMs: sampledAtMs,
+    });
+  }
+
+  return currentState;
+}
+
+function formatRoverDistanceLabel(distanceMeters) {
+  return `${Number(distanceMeters).toFixed(2)} m`;
+}
+
+function formatRoverVelocityLabel(velocityMps) {
+  const numericVelocity = Number(velocityMps);
+  return `${numericVelocity > 0 ? "+" : ""}${numericVelocity.toFixed(2)} m/s`;
+}
+
+function createRoverStreamTokenSample(stream, roverSim) {
+  if (!stream || !roverSim) {
+    return null;
+  }
+
+  const liveRoverState = syncRoverSimState(roverSim);
+
+  if (stream.id === "front-sensor-stream") {
+    const frontDistance = liveRoverState.frontDistance;
+    const commandedVelocityMps = frontDistance < ROVER_FRONT_STOP_DISTANCE_METERS
+      ? ROVER_REVERSE_SPEED_MPS
+      : ROVER_FORWARD_SPEED_MPS;
+    const distanceLabel = formatRoverDistanceLabel(frontDistance);
+
+    return {
+      publishLabel: distanceLabel,
+      deliverLabel: `front ${distanceLabel}`,
+      responseLabel: formatRoverVelocityLabel(commandedVelocityMps),
+      responseVelocityMps: commandedVelocityMps,
+      hardwareState: {
+        frontDistance,
+      },
+    };
+  }
+
+  if (stream.id === "rear-sensor-stream") {
+    const rearDistance = liveRoverState.rearDistance;
+    const shouldPublishResponse = rearDistance < ROVER_REAR_STOP_DISTANCE_METERS;
+    const distanceLabel = formatRoverDistanceLabel(rearDistance);
+
+    return {
+      publishLabel: distanceLabel,
+      deliverLabel: `rear ${distanceLabel}`,
+      responseLabel: shouldPublishResponse ? formatRoverVelocityLabel(ROVER_FORWARD_SPEED_MPS) : null,
+      responseVelocityMps: shouldPublishResponse ? ROVER_FORWARD_SPEED_MPS : null,
+      hardwareState: {
+        rearDistance,
+      },
+    };
+  }
+
+  return null;
 }
 
 function pageFromHash(hashValue = window.location.hash) {
@@ -680,6 +939,7 @@ async function loadConceptCodeExample(exampleId = state.conceptCode.currentExamp
 
   stopConceptCodePlaybackLoop();
   state.conceptCode.currentExampleId = template.id;
+  resetContinuousSimState(template);
   resetConceptCodeInteractions();
 
   if (state.conceptCode.sourceMode === "live") {
@@ -809,6 +1069,283 @@ function stepConceptCodePlayback() {
 
 function restartConceptCodePlayback() {
   resetConceptCodePlayback();
+}
+
+function stopContinuousSimLoop() {
+  if (conceptCodeSimFrameId !== null) {
+    window.cancelAnimationFrame(conceptCodeSimFrameId);
+    conceptCodeSimFrameId = null;
+  }
+  conceptCodeSimLastFrameTime = 0;
+}
+
+function resetContinuousSimState(template = getConceptCodeTemplate(state.conceptCode.currentExampleId)) {
+  stopContinuousSimLoop();
+  conceptCodeSimFireCounters = new Map();
+  state.conceptCode.playback.simClockMs = 0;
+  state.conceptCode.playback.activeTokens = [];
+  state.conceptCode.playback.simLog = [];
+  state.conceptCode.playback.activeCodeBlockIds = [];
+  state.conceptCode.playback.activeSimGraphElementIds = [];
+  state.conceptCode.playback.roverSim = getInitialContinuousRoverSimState(template);
+}
+
+function pauseContinuousSimPlayback() {
+  stopContinuousSimLoop();
+  state.conceptCode.playback.status = "paused";
+  render();
+}
+
+function resetContinuousSimPlayback() {
+  resetContinuousSimState();
+  state.conceptCode.playback.status = "paused";
+  render();
+}
+
+function createSimTokensForStream(stream, fireTimeMs, fireIndex, roverSample = null) {
+  const tokens = [];
+  const prefix = `${stream.id}-${fireIndex}`;
+  let cursor = fireTimeMs;
+  const cycleHardwareState = Array.isArray(stream.hardwareStateCycle) && stream.hardwareStateCycle.length
+    ? stream.hardwareStateCycle[fireIndex % stream.hardwareStateCycle.length]
+    : null;
+  const tokenHardwareState = roverSample?.hardwareState || cycleHardwareState;
+  const publishLabel = roverSample?.publishLabel
+    || (stream.valueCycle ? stream.valueCycle[fireIndex % stream.valueCycle.length] : stream.publishAnimation.label);
+  const deliverLabel = roverSample?.deliverLabel
+    || (stream.deliverLabelCycle
+      ? stream.deliverLabelCycle[fireIndex % stream.deliverLabelCycle.length]
+      : stream.deliverAnimation.label);
+
+  tokens.push({
+    id: `${prefix}-publish`,
+    streamId: stream.id,
+    edgeId: stream.publishAnimation.edgeId,
+    startMs: cursor,
+    endMs: cursor + stream.publishAnimation.durationMs,
+    label: publishLabel,
+    variant: stream.publishAnimation.variant,
+    graphElementIds: stream.graphElementIds,
+    codeBlockId: stream.codeBlockId,
+    ...(tokenHardwareState ? { hardwareState: { ...tokenHardwareState } } : {}),
+  });
+  cursor += stream.publishAnimation.durationMs;
+
+  tokens.push({
+    id: `${prefix}-deliver`,
+    streamId: stream.id,
+    edgeId: stream.deliverAnimation.edgeId,
+    startMs: cursor,
+    endMs: cursor + stream.deliverAnimation.durationMs,
+    label: deliverLabel,
+    variant: stream.deliverAnimation.variant,
+    graphElementIds: stream.graphElementIds,
+    codeBlockId: stream.callbackBlockId,
+    ...(tokenHardwareState ? { hardwareState: { ...tokenHardwareState } } : {}),
+  });
+  cursor += stream.deliverAnimation.durationMs;
+
+  for (const segment of stream.responseAnimation.segments) {
+    const segStart = cursor + (segment.delayMs || 0);
+    const responseLabel = roverSample
+      ? roverSample.responseLabel
+      : (stream.responseCycle ? stream.responseCycle[fireIndex % stream.responseCycle.length] : segment.label);
+    if (!responseLabel) {
+      continue;
+    }
+
+    tokens.push({
+      id: `${prefix}-response-${segment.edgeId}`,
+      streamId: stream.id,
+      edgeId: segment.edgeId,
+      startMs: segStart,
+      endMs: segStart + segment.durationMs,
+      label: responseLabel,
+      variant: segment.variant,
+      graphElementIds: stream.responseAnimation.graphElementIds,
+      codeBlockId: stream.callbackBlockId,
+      ...(tokenHardwareState ? { hardwareState: { ...tokenHardwareState } } : {}),
+    });
+  }
+
+  return tokens;
+}
+
+function startContinuousSimPlayback() {
+  const template = getConceptCodeTemplate(state.conceptCode.currentExampleId);
+  if (!template?.simulation) {
+    return;
+  }
+
+  const simulation = template.simulation;
+  const streams = simulation.streams || [];
+  if (!streams.length) {
+    return;
+  }
+
+  if (state.conceptCode.playback.simClockMs >= simulation.totalDurationMs) {
+    resetContinuousSimState(template);
+  }
+
+  if (isRoverConceptCodeTemplate(template) && !state.conceptCode.playback.roverSim) {
+    state.conceptCode.playback.roverSim = getInitialContinuousRoverSimState(template);
+  }
+
+  state.conceptCode.playback.status = "playing";
+  stopContinuousSimLoop();
+
+  if (conceptCodeSimFireCounters.size === 0) {
+    for (const stream of streams) {
+      conceptCodeSimFireCounters.set(stream.id, 0);
+    }
+  }
+
+  const tick = (timestamp) => {
+    if (state.conceptCode.playback.status !== "playing") {
+      conceptCodeSimFrameId = null;
+      conceptCodeSimLastFrameTime = 0;
+      return;
+    }
+
+    if (!conceptCodeSimLastFrameTime) {
+      conceptCodeSimLastFrameTime = timestamp;
+    }
+
+    const deltaMs = (timestamp - conceptCodeSimLastFrameTime) * state.conceptCode.playback.speed;
+    conceptCodeSimLastFrameTime = timestamp;
+
+    const previousClockMs = state.conceptCode.playback.simClockMs;
+    const newClockMs = Math.min(previousClockMs + deltaMs, simulation.totalDurationMs);
+    state.conceptCode.playback.simClockMs = newClockMs;
+
+    let roverSimSampleState = null;
+    let roverSimSampleClockMs = previousClockMs;
+    if (isRoverConceptCodeTemplate(template)) {
+      roverSimSampleState = state.conceptCode.playback.roverSim || getInitialContinuousRoverSimState(template);
+    }
+
+    const dueFirings = [];
+    for (let streamOrder = 0; streamOrder < streams.length; streamOrder += 1) {
+      const stream = streams[streamOrder];
+      const prevCount = conceptCodeSimFireCounters.get(stream.id) || 0;
+      const expectedCount = Math.floor((newClockMs - stream.offsetMs) / stream.periodMs) + 1;
+      const clampedCount = newClockMs >= stream.offsetMs ? Math.max(expectedCount, 0) : 0;
+
+      if (clampedCount > prevCount) {
+        for (let i = prevCount; i < clampedCount; i += 1) {
+          dueFirings.push({
+            stream,
+            streamOrder,
+            fireIndex: i,
+            fireTimeMs: stream.offsetMs + (i * stream.periodMs),
+          });
+        }
+        conceptCodeSimFireCounters.set(stream.id, clampedCount);
+      }
+    }
+
+    dueFirings.sort((left, right) => {
+      if (left.fireTimeMs !== right.fireTimeMs) {
+        return left.fireTimeMs - right.fireTimeMs;
+      }
+      if (left.streamOrder !== right.streamOrder) {
+        return left.streamOrder - right.streamOrder;
+      }
+      return left.fireIndex - right.fireIndex;
+    });
+
+    for (const firing of dueFirings) {
+      if (roverSimSampleState) {
+        const advanceMs = Math.max(0, firing.fireTimeMs - roverSimSampleClockMs);
+        if (advanceMs > 0) {
+          roverSimSampleState = advanceRoverSimState(roverSimSampleState, advanceMs);
+          roverSimSampleClockMs = firing.fireTimeMs;
+        }
+      }
+
+      const roverSample = roverSimSampleState
+        ? createRoverStreamTokenSample(firing.stream, roverSimSampleState)
+        : null;
+      if (roverSimSampleState && roverSample) {
+        roverSimSampleState = recordRoverSensorSample(
+          roverSimSampleState,
+          firing.stream,
+          roverSample,
+          firing.fireTimeMs
+        );
+      }
+      const tokens = createSimTokensForStream(
+        firing.stream,
+        firing.fireTimeMs,
+        firing.fireIndex,
+        roverSample
+      );
+      state.conceptCode.playback.activeTokens.push(...tokens);
+      state.conceptCode.playback.simLog.push({
+        id: `${firing.stream.id}-${firing.fireIndex}`,
+        streamId: firing.stream.id,
+        label: `${firing.stream.label} fired`,
+        firedAtMs: firing.fireTimeMs,
+        sampledLabel: roverSample?.deliverLabel || roverSample?.publishLabel || "",
+        codeBlockId: firing.stream.codeBlockId,
+        callbackBlockId: firing.stream.callbackBlockId,
+        graphElementIds: firing.stream.graphElementIds,
+      });
+
+      if (
+        roverSimSampleState
+        && roverSample?.responseVelocityMps !== null
+        && roverSample?.responseVelocityMps !== undefined
+        && Number.isFinite(Number(roverSample.responseVelocityMps))
+      ) {
+        const applyDelayMs = getRoverMotorDriverApplyDelayMs(firing.stream);
+        if (Number.isFinite(Number(applyDelayMs))) {
+          roverSimSampleState = queueRoverCommandApplication(
+            roverSimSampleState,
+            roverSample.responseVelocityMps,
+            applyDelayMs
+          );
+        }
+      }
+    }
+
+    if (roverSimSampleState) {
+      const trailingAdvanceMs = Math.max(0, newClockMs - roverSimSampleClockMs);
+      if (trailingAdvanceMs > 0) {
+        roverSimSampleState = advanceRoverSimState(roverSimSampleState, trailingAdvanceMs);
+      }
+      state.conceptCode.playback.roverSim = roverSimSampleState;
+    }
+
+    state.conceptCode.playback.activeTokens = state.conceptCode.playback.activeTokens
+      .filter((token) => token.endMs > newClockMs);
+
+    const activeBlockIds = new Set();
+    const activeGraphIds = new Set();
+    for (const token of state.conceptCode.playback.activeTokens) {
+      if (token.startMs <= newClockMs && token.endMs > newClockMs) {
+        if (token.codeBlockId) {
+          activeBlockIds.add(token.codeBlockId);
+        }
+        for (const gid of token.graphElementIds || []) {
+          activeGraphIds.add(gid);
+        }
+      }
+    }
+    state.conceptCode.playback.activeCodeBlockIds = [...activeBlockIds];
+    state.conceptCode.playback.activeSimGraphElementIds = [...activeGraphIds];
+
+    if (newClockMs >= simulation.totalDurationMs) {
+      pauseContinuousSimPlayback();
+      return;
+    }
+
+    render();
+    conceptCodeSimFrameId = window.requestAnimationFrame(tick);
+  };
+
+  conceptCodeSimFrameId = window.requestAnimationFrame(tick);
+  render();
 }
 
 async function setConceptCodeSourceMode(mode) {
@@ -1083,6 +1620,233 @@ function syncTopicComposerRawFromSimple(typeName) {
   }
 }
 
+function cloneTopicComposer(composer) {
+  return {
+    ...createTopicComposerState(),
+    ...composer,
+  };
+}
+
+function scrollSelectedTopicIntoView() {
+  window.requestAnimationFrame(() => {
+    root.querySelector("[data-topic-detail]")?.scrollIntoView({
+      block: "start",
+      behavior: "smooth",
+    });
+  });
+}
+
+function syncDraftTopicComposerRawFromSimple() {
+  const typeName = state.topics.draft.type;
+  if (typeName === CUSTOM_TOPIC_TYPE_OPTION || !simpleTopicEditorFor(typeName)) {
+    return;
+  }
+
+  try {
+    state.topics.draft.composer.rawText = syncTopicComposerRaw(typeName, state.topics.draft.composer);
+  } catch (_error) {
+    // Keep the last valid raw state while the user is mid-edit.
+  }
+}
+
+function uniqueValues(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  )];
+}
+
+function resolveDraftTopicDefinition() {
+  const name = String(state.topics.draft.name || "").trim();
+  const type = String(
+    state.topics.draft.type === CUSTOM_TOPIC_TYPE_OPTION
+      ? state.topics.draft.customType
+      : state.topics.draft.type
+  ).trim();
+
+  if (!name) {
+    throw new Error("Enter a topic name.");
+  }
+
+  if (!type) {
+    throw new Error("Choose a message type.");
+  }
+
+  return { name, type };
+}
+
+function upsertTopicDetail(detail, options = {}) {
+  const cacheKey = selectionCacheKey("topic", detail.name);
+  const existingDetail = state.graph.details.get(cacheKey);
+  const nextDetail = {
+    kind: "topic",
+    name: String(detail.name || existingDetail?.name || ""),
+    type: String(detail.type || existingDetail?.type || ""),
+    localOnly: options.localOnly === undefined
+      ? Boolean(existingDetail?.localOnly)
+      : Boolean(options.localOnly),
+    publishers: uniqueValues([
+      ...(detail.publishers || []),
+      ...(existingDetail?.publishers || []),
+    ]),
+    subscribers: uniqueValues([
+      ...(existingDetail?.subscribers || []),
+      ...(detail.subscribers || []),
+    ]),
+  };
+
+  state.graph.details.set(cacheKey, nextDetail);
+  if (nextDetail.type) {
+    state.graph.topicTypes.set(nextDetail.name, nextDetail.type);
+  }
+  if (nextDetail.name && !state.graph.topics.includes(nextDetail.name)) {
+    state.graph.topics = [nextDetail.name, ...state.graph.topics];
+  }
+
+  return nextDetail;
+}
+
+function activateTopicDetail(detail, options = {}) {
+  const topicChanged = state.topics.selectedTopicName !== detail.name;
+  if (topicChanged && state.topicStream.topicName && state.topicStream.topicName !== detail.name) {
+    stopTopicStream(false);
+  }
+  if (topicChanged) {
+    resetTopicFlowState();
+  }
+
+  const nextDetail = upsertTopicDetail(detail, { localOnly: options.localOnly });
+  state.topics.creatingTopic = false;
+  state.topics.selectedTopicName = nextDetail.name;
+  if (options.composer) {
+    state.topics.composer = cloneTopicComposer(options.composer);
+  }
+  if (options.publishResult) {
+    state.topics.publishResult = options.publishResult;
+  }
+  clearError();
+  return nextDetail;
+}
+
+function clearTopicSelection(options = {}) {
+  const { resetDraftFeedback = false } = options;
+  stopTopicStream(false);
+  resetTopicFlowState();
+  state.topics.selectedTopicName = "";
+  state.topics.composer = createTopicComposerState();
+  state.topics.publishResult = createFeedbackState("Select a topic to inspect or publish.");
+  if (resetDraftFeedback) {
+    state.topics.draft.result = createFeedbackState("", "idle");
+  }
+}
+
+function insertDraftTopicTemplate() {
+  const typeName = state.topics.draft.type === CUSTOM_TOPIC_TYPE_OPTION
+    ? String(state.topics.draft.customType || "").trim()
+    : state.topics.draft.type;
+
+  if (state.topics.draft.type !== CUSTOM_TOPIC_TYPE_OPTION && typeName) {
+    state.topics.draft.composer = seedTopicComposer(typeName);
+  } else {
+    state.topics.draft.composer = {
+      ...cloneTopicComposer(state.topics.draft.composer),
+      mode: "raw",
+      rawText: "{}",
+    };
+  }
+
+  state.topics.draft.composer.rawText = JSON.stringify(topicTemplateFor(typeName), null, 2);
+  state.topics.draft.result = createFeedbackState("", "idle");
+  clearError();
+  render();
+}
+
+function setDraftTopicType(nextType) {
+  state.topics.draft.type = String(nextType || CUSTOM_TOPIC_TYPE_OPTION);
+  state.topics.draft.result = createFeedbackState("", "idle");
+
+  if (state.topics.draft.type === CUSTOM_TOPIC_TYPE_OPTION) {
+    state.topics.draft.composer = {
+      ...cloneTopicComposer(state.topics.draft.composer),
+      mode: "raw",
+      rawText: state.topics.draft.composer.rawText || "{}",
+    };
+    render();
+    return;
+  }
+
+  state.topics.draft.composer = seedTopicComposer(state.topics.draft.type);
+  render();
+}
+
+function showDraftTopicCreator() {
+  state.topics.creatingTopic = true;
+  clearTopicSelection({ resetDraftFeedback: true });
+  clearError();
+  render();
+}
+
+function hideDraftTopicCreator() {
+  state.topics.creatingTopic = false;
+  state.topics.draft.result = createFeedbackState("", "idle");
+  clearError();
+  render();
+}
+
+async function openDraftTopic() {
+  try {
+    const draft = resolveDraftTopicDefinition();
+    const draftComposer = cloneTopicComposer(state.topics.draft.composer);
+    const detail = activateTopicDetail({
+      kind: "topic",
+      name: draft.name,
+      type: draft.type,
+      publishers: [],
+      subscribers: [],
+    }, {
+      composer: draftComposer,
+      publishResult: createFeedbackState(`Ready to publish to ${draft.name}.`),
+      localOnly: true,
+    });
+
+    state.topics.draft.result = createFeedbackState(`Opened ${detail.name} below.`, "success");
+    render();
+    scrollSelectedTopicIntoView();
+  } catch (error) {
+    state.topics.draft.result = createFeedbackState(error.message, "error");
+    setError(`Unable to open topic: ${error.message}`);
+  }
+}
+
+function closeSelectedTopic() {
+  const topicName = state.topics.selectedTopicName;
+  if (!topicName) {
+    return;
+  }
+
+  const cacheKey = selectionCacheKey("topic", topicName);
+  const detail = state.graph.details.get(cacheKey);
+  const localOnly = Boolean(detail?.localOnly);
+
+  if (localOnly) {
+    client.unadvertise(topicName);
+    state.graph.topics = state.graph.topics.filter((name) => name !== topicName);
+    state.graph.details.delete(cacheKey);
+    state.graph.topicTypes.delete(topicName);
+  }
+
+  clearTopicSelection();
+  state.topics.draft.result = createFeedbackState(
+    localOnly
+      ? `Destroyed ${topicName}.`
+      : "Only browser-created topics can be destroyed here.",
+    "success"
+  );
+  clearError();
+  render();
+}
+
 function pushTopicMessage(messageObject) {
   const formatted = `[${new Date().toLocaleTimeString()}]\n${JSON.stringify(messageObject, null, 2)}`;
   state.topicStream.messages.unshift(formatted);
@@ -1322,6 +2086,7 @@ async function selectTopic(topicName) {
     resetTopicFlowState();
   }
 
+  state.topics.creatingTopic = false;
   state.topics.selectedTopicName = topicName;
   clearError();
   render();
@@ -1368,11 +2133,7 @@ function pruneSelectionsAgainstGraph() {
   }
 
   if (!state.graph.topics.includes(state.topics.selectedTopicName)) {
-    state.topics.selectedTopicName = "";
-    state.topics.composer = createTopicComposerState();
-    state.topics.publishResult = createFeedbackState("Select a topic to inspect or publish.");
-    resetTopicFlowState();
-    stopTopicStream(false);
+    clearTopicSelection();
   }
 }
 
@@ -1517,12 +2278,31 @@ async function handleAction(action, element) {
     case "insert-topic-template":
       insertTopicTemplate();
       return;
+    case "insert-draft-topic-template":
+      insertDraftTopicTemplate();
+      return;
+    case "show-draft-topic":
+      showDraftTopicCreator();
+      return;
+    case "hide-draft-topic":
+      hideDraftTopicCreator();
+      return;
     case "set-publish-mode":
       state.topics.composer.mode = element.dataset.mode || "raw";
       render();
       return;
+    case "set-draft-publish-mode":
+      state.topics.draft.composer.mode = element.dataset.mode || "raw";
+      render();
+      return;
+    case "open-draft-topic":
+      await openDraftTopic();
+      return;
     case "publish-topic":
       await publishSelectedTopic();
+      return;
+    case "close-topic":
+      closeSelectedTopic();
       return;
     case "insert-service-template":
       await insertServiceTemplate();
@@ -1569,6 +2349,32 @@ async function handleAction(action, element) {
     case "concept-reset":
       restartConceptCodePlayback();
       return;
+    case "concept-sim-start":
+      if (state.conceptCode.playback.mode === "continuous") {
+        startContinuousSimPlayback();
+      }
+      return;
+    case "concept-sim-pause":
+      pauseContinuousSimPlayback();
+      return;
+    case "concept-sim-reset":
+      resetContinuousSimPlayback();
+      return;
+    case "concept-set-playback-mode": {
+      const newMode = element.dataset.mode === "continuous" ? "continuous" : "step";
+      if (newMode === state.conceptCode.playback.mode) {
+        return;
+      }
+      stopConceptCodePlaybackLoop();
+      stopContinuousSimLoop();
+      resetContinuousSimState();
+      state.conceptCode.playback.mode = newMode;
+      state.conceptCode.playback.status = "paused";
+      state.conceptCode.playback.activeEventIndex = 0;
+      state.conceptCode.playback.progressMs = 0;
+      render();
+      return;
+    }
     case "concept-toggle-dock-compact":
       state.conceptCode.dock.compact = !state.conceptCode.dock.compact;
       render();
@@ -1766,8 +2572,25 @@ function bindEvents() {
         state.topics.searchText = target.value;
         render();
         return;
+      case "draft-topic-name":
+        state.topics.draft.name = target.value;
+        return;
+      case "draft-topic-custom-type":
+        state.topics.draft.customType = target.value;
+        return;
+      case "draft-topic-raw":
+        state.topics.draft.composer.rawText = target.value;
+        return;
       case "topic-raw":
         state.topics.composer.rawText = target.value;
+        return;
+      case "draft-topic-simple-text":
+        state.topics.draft.composer.simpleText = target.value;
+        syncDraftTopicComposerRawFromSimple();
+        return;
+      case "draft-topic-simple-number":
+        state.topics.draft.composer.simpleNumber = target.value;
+        syncDraftTopicComposerRawFromSimple();
         return;
       case "topic-simple-text": {
         const detail = state.graph.details.get(selectionCacheKey("topic", state.topics.selectedTopicName));
@@ -1826,6 +2649,13 @@ function bindEvents() {
       case "system-show-services":
         state.system.showServices = !!target.checked;
         render();
+        return;
+      case "draft-topic-type":
+        setDraftTopicType(target.value);
+        return;
+      case "draft-topic-simple-bool":
+        state.topics.draft.composer.simpleBool = !!target.checked;
+        syncDraftTopicComposerRawFromSimple();
         return;
       case "topic-simple-bool": {
         const detail = state.graph.details.get(selectionCacheKey("topic", state.topics.selectedTopicName));

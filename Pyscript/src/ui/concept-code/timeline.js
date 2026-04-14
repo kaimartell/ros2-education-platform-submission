@@ -21,7 +21,89 @@ function renderStepKindLabel(eventType) {
   }
 }
 
+function getCodeBlockLabel(template, blockId) {
+  if (!template || !blockId) {
+    return "";
+  }
+
+  const block = template.code.blocks.find((item) => item.id === blockId);
+  return block ? block.label : "";
+}
+
+function getContinuousTimelineMeta(viewModel, entry) {
+  return getCodeBlockLabel(viewModel.template, entry.callbackBlockId || entry.codeBlockId || "");
+}
+
+function renderContinuousTimeline(viewModel) {
+  const clockSeconds = (viewModel.simClockMs / 1000).toFixed(1);
+  const totalSeconds = (viewModel.simTotalDurationMs / 1000).toFixed(1);
+  const progressPercent = Math.round(viewModel.simProgressRatio * 100);
+  const logEntries = viewModel.simLog || [];
+  const simulationCopy = viewModel.template.simulation?.copy || {};
+  const timelineCopy = viewModel.continuousRoverStatus
+    ? (logEntries.length
+      ? "Each sensor reading enters the live loop as a sampled snapshot, so a newer reading can change course before the staged rear-wall callback appears."
+      : "Simulation has not started yet.")
+    : simulationCopy.timeline || (logEntries.length
+      ? "Each row shows one live stream firing."
+      : "Simulation has not started yet.");
+
+  return `
+    <div class="concept-timeline-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Simulation timeline</p>
+          <h3>${escapeHtml(clockSeconds)}s / ${escapeHtml(totalSeconds)}s</h3>
+        </div>
+        ${renderTag(logEntries.length ? `${logEntries.length} events` : "Ready", "accent")}
+      </div>
+
+      <p class="concept-panel-copy">
+        ${escapeHtml(timelineCopy)}
+      </p>
+
+      <div class="concept-rail-shell">
+        <div class="concept-rail-track">
+          <span class="concept-rail-progress" style="width: ${progressPercent}%;"></span>
+        </div>
+      </div>
+
+      <div class="concept-timeline-list">
+        ${logEntries.length
+          ? logEntries.map((entry) => {
+            const metaLabel = getContinuousTimelineMeta(viewModel, entry);
+
+            return `
+              <div class="concept-timeline-item">
+                <span class="concept-timeline-seq">${escapeHtml((entry.firedAtMs / 1000).toFixed(1))}s</span>
+                <span class="concept-timeline-copy">
+                  <strong>${escapeHtml(entry.label)}</strong>
+                  ${entry.sampledLabel
+                    ? `<span>${escapeHtml(`Sampled ${entry.sampledLabel} into ROS.`)}</span>`
+                    : ""}
+                </span>
+                ${metaLabel
+                  ? `<span class="concept-timeline-meta">${escapeHtml(metaLabel)}</span>`
+                  : ""}
+              </div>
+            `;
+          }).join("")
+          : `<div class="concept-timeline-item">
+              <span class="concept-timeline-copy">
+                <strong>${escapeHtml("Press play to start the simulation.")}</strong>
+              </span>
+            </div>`
+        }
+      </div>
+    </div>
+  `;
+}
+
 export function renderEventTimeline(viewModel) {
+  if (viewModel.isContinuousMode) {
+    return renderContinuousTimeline(viewModel);
+  }
+
   const title = viewModel.guidedMode
     ? `Lesson step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`
     : `Step ${viewModel.currentStepNumber} of ${viewModel.totalSteps}`;

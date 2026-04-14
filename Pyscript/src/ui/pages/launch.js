@@ -1,7 +1,19 @@
 import { escapeHtml, feedbackTone, renderPill, renderTag } from "../utils.js";
 
 function renderModePill(available) {
-  return renderPill(available ? "Launch ready" : "Browse demos", available ? "success" : "default");
+  return renderPill(available ? "Launch ready" : "Guides only", available ? "success" : "default");
+}
+
+function getItemStatus(item, launchAvailable) {
+  if (!item?.canLaunch) {
+    return { label: "Reference", tone: "default" };
+  }
+
+  if (launchAvailable) {
+    return { label: "Ready", tone: "success" };
+  }
+
+  return { label: "Launch unavailable", tone: "warning" };
 }
 
 function renderSourceTag(sourceLabel) {
@@ -19,11 +31,8 @@ function renderSourceTag(sourceLabel) {
 }
 
 function renderItemStatus(item, launchAvailable) {
-  if (item.canLaunch && launchAvailable) {
-    return renderPill("Ready", "success");
-  }
-
-  return renderPill("View only", "default");
+  const status = getItemStatus(item, launchAvailable);
+  return renderPill(status.label, status.tone);
 }
 
 function renderItemCategory(category) {
@@ -37,17 +46,56 @@ function renderItemCategory(category) {
   return renderTag(category);
 }
 
+function renderLaunchOverview(launchAvailable) {
+  return `
+    <p class="muted">
+      Cards come from the built-in learning catalog or a connected ROS system. Launch asks the
+      Docker <code>launch_api_server</code> to start or stop ROS launch files.${launchAvailable
+        ? ""
+        : " The launch backend is unavailable right now, so this page is showing guides instead of runnable demos."}
+    </p>
+  `;
+}
+
+function renderSelectedItemHelp(item, launchAvailable) {
+  if (!item?.canLaunch) {
+    return "This card is a guide. It explains the demo and may include a terminal command, but it does not start anything from this page.";
+  }
+
+  if (!launchAvailable) {
+    return "This demo can start from the page only when the Docker launch backend is available.";
+  }
+
+  return "Use Launch and Stop to ask the Docker backend to start or stop this demo's ROS launch file.";
+}
+
+function renderLaunchBackendNotice(item, launchAvailable) {
+  if (launchAvailable) {
+    return "";
+  }
+
+  return `
+    <div class="callout callout-warning">
+      ${item?.canLaunch
+        ? "Launch controls need the Docker backend. You can still browse this demo while it is unavailable."
+        : "The launch backend is unavailable right now, so this page is staying in guide mode."}
+    </div>
+  `;
+}
+
 function renderLaunchItem(item, isSelected, launchAvailable) {
   return `
     <button
       type="button"
       class="list-button launch-item ${isSelected ? "active" : ""}"
+      aria-pressed="${isSelected ? "true" : "false"}"
       data-action="select-launch-item"
       data-id="${escapeHtml(item.id)}"
     >
       <span class="list-title">${escapeHtml(item.title)}</span>
       <span class="list-meta">${escapeHtml(item.detail)}</span>
       <span class="launch-item-footer">
+        ${isSelected ? renderPill("Selected", "default") : ""}
         ${renderItemCategory(item.category)}
         ${renderItemStatus(item, launchAvailable)}
       </span>
@@ -63,8 +111,8 @@ function renderReferenceCommand(command) {
   return `
     <details>
       <summary>Show terminal command</summary>
-      <p class="muted">Use this if you want to start the demo from a terminal.</p>
-      <pre class="code-box">${escapeHtml(command)}</pre>
+      <p class="muted">Run this in a terminal connected to the Docker container.</p>
+      <pre class="code-box" style="max-width: 100%; overflow-x: auto;">${escapeHtml(command)}</pre>
     </details>
   `;
 }
@@ -94,7 +142,7 @@ export function renderLaunchPage(state) {
       <article class="panel page-intro">
         <div class="page-intro-copy">
           <p class="eyebrow">Launch</p>
-          <h2>Launch demos and see what ROS processes are available.</h2>
+          <h2>Start and stop ROS demos in the Docker container, or browse their guides.</h2>
         </div>
         <div class="page-intro-side">
           ${renderModePill(state.launch.available)}
@@ -110,6 +158,7 @@ export function renderLaunchPage(state) {
             </div>
             ${launchItems.length ? renderSourceTag(state.launch.sourceLabel) : ""}
           </div>
+          ${renderLaunchOverview(state.launch.available)}
 
           <div class="list-stack">
             ${launchItems.length
@@ -123,13 +172,15 @@ export function renderLaunchPage(state) {
             <section class="detail-stack">
               <div class="section-head">
                 <div>
-                  <p class="eyebrow">Selected demo</p>
+                  <p class="eyebrow">Selected item</p>
                   <h2>${escapeHtml(selectedItem.title)}</h2>
                 </div>
                 ${renderItemStatus(selectedItem, state.launch.available)}
               </div>
 
               <p class="muted">${escapeHtml(selectedItem.detail)}</p>
+              <p class="muted">${escapeHtml(renderSelectedItemHelp(selectedItem, state.launch.available))}</p>
+              ${renderLaunchBackendNotice(selectedItem, state.launch.available)}
 
               ${renderReferenceCommand(selectedItem.command)}
 
@@ -137,7 +188,7 @@ export function renderLaunchPage(state) {
                 <section class="detail-section">
                   <div class="section-head">
                     <h3>Launch controls</h3>
-                    ${renderTag(selectedItem.canLaunch ? "Ready" : "View only")}
+                    ${renderItemStatus(selectedItem, state.launch.available)}
                   </div>
                   ${selectedItem.canLaunch ? `
                     <div class="action-row">
@@ -145,7 +196,7 @@ export function renderLaunchPage(state) {
                       <button type="button" data-action="launch-stop">Stop</button>
                     </div>
                   ` : `
-                    <p class="muted">This demo is view only, so there is nothing to start here.</p>
+                    <p class="muted">This is a reference guide, so there is nothing to start from this page.</p>
                   `}
                   ${hasLaunchFeedback ? `
                     <div class="callout callout-${feedbackClass}">

@@ -11,7 +11,7 @@ def generate_launch_description() -> LaunchDescription:
             "greeting_prefix", default_value="Hello from lesson_source_node"
         ),
         DeclareLaunchArgument("publish_period_sec", default_value="1.0"),
-        DeclareLaunchArgument("stream_enabled", default_value="true"),
+        DeclareLaunchArgument("stream_enabled", default_value="false"),
         DeclareLaunchArgument("note_prefix", default_value="Reflector summary"),
     ]
 

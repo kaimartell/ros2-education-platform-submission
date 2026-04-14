@@ -2,33 +2,60 @@ import { escapeHtml } from "../utils.js";
 
 export function renderPlaybackControls(state, viewModel) {
   const playback = state.conceptCode.playback;
+  const isContinuous = viewModel.isContinuousMode;
+  const modeToggle = viewModel.hasSimulation ? `
+    <div class="mode-switch">
+      <button
+        type="button"
+        class="${!isContinuous ? "active" : ""}"
+        data-action="concept-set-playback-mode"
+        data-mode="step"
+      >Step</button>
+      <button
+        type="button"
+        class="${isContinuous ? "active" : ""}"
+        data-action="concept-set-playback-mode"
+        data-mode="continuous"
+      >Simulate</button>
+    </div>
+  ` : "";
+  const playAction = isContinuous ? "concept-sim-start" : "concept-play";
+  const pauseAction = isContinuous ? "concept-sim-pause" : "concept-pause";
+  const resetAction = isContinuous ? "concept-sim-reset" : "concept-reset";
+  const canPlay = isContinuous || viewModel.events.length;
+  const playbackAction = playback.status === "playing" ? pauseAction : playAction;
+  const playbackLabel = playback.status === "playing" ? "Pause" : "Play";
+  const playbackIcon = playback.status === "playing" ? "&#x23F8;" : "&#x25B6;";
 
   return `
     <div class="concept-playback-strip">
+      ${modeToggle}
       <div class="concept-playback-buttons">
         <button
           type="button"
           class="concept-playback-icon accent"
-          data-action="${playback.status === "playing" ? "concept-pause" : "concept-play"}"
-          ${viewModel.events.length ? "" : "disabled"}
-          title="${playback.status === "playing" ? "Pause" : "Play"}"
-          aria-label="${playback.status === "playing" ? "Pause" : "Play"}"
+          data-action="${playbackAction}"
+          ${canPlay ? "" : "disabled"}
+          title="${escapeHtml(playbackLabel)}"
+          aria-label="${escapeHtml(playbackLabel)}"
         >
-          ${playback.status === "playing" ? "&#x23F8;" : "&#x25B6;"}
+          ${playbackIcon}
         </button>
+        ${isContinuous ? "" : `
+          <button
+            type="button"
+            class="concept-playback-icon"
+            data-action="concept-step"
+            ${viewModel.events.length ? "" : "disabled"}
+            title="Step forward"
+            aria-label="Step forward"
+          >&#x23ED;</button>
+        `}
         <button
           type="button"
           class="concept-playback-icon"
-          data-action="concept-step"
-          ${viewModel.events.length ? "" : "disabled"}
-          title="Step forward"
-          aria-label="Step forward"
-        >&#x23ED;</button>
-        <button
-          type="button"
-          class="concept-playback-icon"
-          data-action="concept-reset"
-          ${viewModel.events.length ? "" : "disabled"}
+          data-action="${resetAction}"
+          ${canPlay ? "" : "disabled"}
           title="Restart"
           aria-label="Restart"
         >&#x21BB;</button>
